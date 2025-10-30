@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asta-resource-repository"
+version = "0.1.0"
+description = "MCP server for Asta resource management"
+authors = [{name = "Asta Resource Repository Team"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp~=2.12",
+    "fastapi~=0.115",
+    "uvicorn~=0.32",
+    "asyncio-mqtt~=0.1",
+    "aiofiles~=23.0",
+    "pydantic~=2.11",
+    "asyncpg~=0.29",
+    "pyhocon~=0.3",
+    "click~=8.1",
+    "anthropic~=0.39",
+    "mcp~=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black~=25.9",
+    "flake8~=7.3",
+    "pytest~=8.0",
+    "pytest-asyncio~=0.24",
+    "httpx~=0.28",
+    "requests~=2.32",
+    "mcp[cli]~=1.15",
+]
+chatbot = [
+    "anthropic~=0.39",
+    "mcp~=1.2",
+]
+
+[tool.flake8]
+select = [
+    # F category for logical errors
+    "F",
+
+    # Serious "E" errors
+    "E721", # `type(x) == <t>` instead of `isinstance(x, <t>)`
+    "E901", "E902", "E999" # syntax errors
+]
+
+ignore = [
+#    "F401",  # module imported but unused
+#    "F541",  # f-string is missing placeholders
+]
+
+
+[project.scripts]
+asta-resources-server = "asta.resources.server:main"
+asta-resources-mcp = "asta.resources.mcp_server:main"
+asta-resources-chatbot = "asta.resources.cli.chatbot:main"
+
+[project.urls]
+Homepage = "https://github.com/example/asta-resource-repository"
+Repository = "https://github.com/example/asta-resource-repository"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+"asta.resources.config" = ["*.conf"]
