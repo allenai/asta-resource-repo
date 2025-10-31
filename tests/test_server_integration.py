@@ -235,7 +235,7 @@ async def test_get_nonexistent_document(document_store, temp_data_dir):
 
     # Use a valid document URI format that doesn't exist
     fake_uuid = str(uuid.uuid4())
-    fake_doc_uri = f"asta://{document_store.env_name}/{fake_uuid}"
+    fake_doc_uri = f"asta://{document_store.namespace}/{document_store.resource_type}/{fake_uuid}"
 
     result = await document_store.get(fake_doc_uri)
     assert result is None

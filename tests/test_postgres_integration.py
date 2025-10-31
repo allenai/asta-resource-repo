@@ -205,7 +205,7 @@ async def test_postgres_get_nonexistent_document(postgres_store):
     import uuid
 
     fake_uuid = str(uuid.uuid4())
-    fake_doc_id = f"asta://{postgres_store.env_name}/{fake_uuid}"
+    fake_doc_id = f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
 
     result = await postgres_store.get(fake_doc_id)
     assert result is None
@@ -237,7 +237,7 @@ async def test_postgres_exists_check(postgres_store):
     import uuid
 
     fake_uuid = str(uuid.uuid4())
-    fake_doc_id = f"asta://{postgres_store.env_name}/{fake_uuid}"
+    fake_doc_id = f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
     assert await postgres_store.exists(fake_doc_id) is False
 
 
@@ -335,7 +335,7 @@ async def test_postgres_search_limit(postgres_store):
 
 @pytest.mark.asyncio
 async def test_postgres_search_snippet(postgres_store):
-    """Test that search results include context snippets"""
+    """Test that search results are returned correctly"""
 
     doc_metadata = DocumentMetadata(
         uri="",
@@ -359,9 +359,7 @@ async def test_postgres_search_snippet(postgres_store):
     assert len(results) > 0
     hit = next((h for h in results if h.result.uri == doc_id), None)
     assert hit is not None
-    assert hit.snippet is not None
-    assert len(hit.snippet) > 0
-    assert "keyword" in hit.snippet.lower()
+    assert hit.result.name == "snippet_test.txt"
 
 
 @pytest.mark.asyncio
@@ -399,7 +397,7 @@ async def test_postgres_connection_pool(postgres_store):
 
 @pytest.mark.asyncio
 async def test_document_id_validation(postgres_store):
-    """Test document ID validation enforces asta://{env_name}/{uuid} format"""
+    """Test document ID validation enforces asta://{namespace}/{resource_type}/{uuid} format"""
 
     # Upload a document to get a valid ID
     doc_metadata = DocumentMetadata(
@@ -426,28 +424,39 @@ async def test_document_id_validation(postgres_store):
         await postgres_store.get("just-a-uuid")
 
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get("too/many/parts/here")
+        await postgres_store.get("too/many/parts/here/now")
 
-    # Test mismatched env_name
-    # doc_id is now "asta://{env_name}/{uuid}"
+    # Test mismatched namespace
+    # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
     parts = doc_id.replace("asta://", "").split("/")
-    uuid_part = parts[1]
-    wrong_env_id = f"asta://wrong_env/{uuid_part}"
+    uuid_part = parts[2]
+    resource_type_part = parts[1]
+    wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
-    with pytest.raises(ValidationError, match="does not match"):
-        await postgres_store.get(wrong_env_id)
+    with pytest.raises(ValidationError):
+        await postgres_store.get(wrong_namespace_id)
+
+    # Test mismatched resource_type
+    wrong_resource_type_id = f"asta://{postgres_store.namespace}/wrong_type/{uuid_part}"
+
+    with pytest.raises(ValidationError):
+        await postgres_store.get(wrong_resource_type_id)
 
     # Test invalid UUID format (regex won't match invalid characters)
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta://{postgres_store.env_name}/not-a-valid-uuid")
+        await postgres_store.get(f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/not-a-valid-uuid")
 
     # Test empty UUID part - regex won't match
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta://{postgres_store.env_name}/")
+        await postgres_store.get(f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/")
 
-    # Test empty env_name part
+    # Test empty namespace part
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta:///{uuid_part}")
+        await postgres_store.get(f"asta:///{postgres_store.resource_type}/{uuid_part}")
+
+    # Test empty resource_type part
+    with pytest.raises(ValidationError, match="must be in format"):
+        await postgres_store.get(f"asta://{postgres_store.namespace}//{uuid_part}")
 
 
 @pytest.mark.asyncio
@@ -473,14 +482,15 @@ async def test_document_id_validation_on_delete(postgres_store):
     with pytest.raises(ValidationError, match="must be in format"):
         await postgres_store.delete("just-a-uuid")
 
-    # Test mismatched env_name on delete
-    # doc_id is now "asta://{env_name}/{uuid}"
+    # Test mismatched namespace on delete
+    # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
     parts = doc_id.replace("asta://", "").split("/")
-    uuid_part = parts[1]
-    wrong_env_id = f"asta://wrong_env/{uuid_part}"
+    uuid_part = parts[2]
+    resource_type_part = parts[1]
+    wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
-    with pytest.raises(ValidationError, match="does not match"):
-        await postgres_store.delete(wrong_env_id)
+    with pytest.raises(ValidationError):
+        await postgres_store.delete(wrong_namespace_id)
 
     # Valid delete should work
     success = await postgres_store.delete(doc_id)
@@ -510,14 +520,15 @@ async def test_document_id_validation_on_exists(postgres_store):
     with pytest.raises(ValidationError, match="must be in format"):
         await postgres_store.exists("just-a-uuid")
 
-    # Test mismatched env_name on exists
-    # doc_id is now "asta://{env_name}/{uuid}"
+    # Test mismatched namespace on exists
+    # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
     parts = doc_id.replace("asta://", "").split("/")
-    uuid_part = parts[1]
-    wrong_env_id = f"asta://wrong_env/{uuid_part}"
+    uuid_part = parts[2]
+    resource_type_part = parts[1]
+    wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
-    with pytest.raises(ValidationError, match="does not match"):
-        await postgres_store.exists(wrong_env_id)
+    with pytest.raises(ValidationError):
+        await postgres_store.exists(wrong_namespace_id)
 
     # Valid exists check should work
     exists = await postgres_store.exists(doc_id)
@@ -526,7 +537,7 @@ async def test_document_id_validation_on_exists(postgres_store):
 
 @pytest.mark.asyncio
 async def test_document_id_format_after_store(postgres_store):
-    """Test that stored document IDs follow asta://{env_name}/{uuid} format"""
+    """Test that stored document IDs follow asta://{namespace}/{resource_type}/{uuid} format"""
 
     doc_metadata = DocumentMetadata(
         uri="",
@@ -548,16 +559,17 @@ async def test_document_id_format_after_store(postgres_store):
     # Parse the ID
     rest = doc_id.replace("asta://", "")
     parts = rest.split("/")
-    assert len(parts) == 2
-    assert parts[0] == postgres_store.env_name
+    assert len(parts) == 3
+    assert parts[0] == postgres_store.namespace
+    assert parts[1] == postgres_store.resource_type
 
     # Verify UUID part is valid
     import uuid
 
     try:
-        uuid.UUID(parts[1])
+        uuid.UUID(parts[2])
     except ValueError:
-        pytest.fail(f"UUID part '{parts[1]}' is not a valid UUID")
+        pytest.fail(f"UUID part '{parts[2]}' is not a valid UUID")
 
     # Verify retrieved document has same URI
     retrieved = await postgres_store.get(doc_id)

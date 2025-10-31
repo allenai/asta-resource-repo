@@ -69,13 +69,14 @@ class TestDockerDeployment:
         assert upload_response.status_code == 201
         doc_uri = upload_response.json()["uri"]
 
-        # Extract env and uuid from URI (format: asta://{env}/{uuid})
+        # Extract namespace, resource_type, and uuid from URI (format: asta://{namespace}/{resource_type}/{uuid})
         uri_parts = doc_uri.replace("asta://", "").split("/")
-        env = uri_parts[0]
-        uuid = uri_parts[1]
+        namespace = uri_parts[0]
+        resource_type = uri_parts[1]
+        uuid = uri_parts[2]
 
         # 2. Retrieve the document
-        get_response = requests.get(f"{API_BASE_URL}/rest/documents/{env}/{uuid}")
+        get_response = requests.get(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert get_response.status_code == 200
         assert get_response.json()["filename"] == "docker_test.txt"
 
@@ -93,11 +94,11 @@ class TestDockerDeployment:
         assert len(search_response.json()["results"]) >= 1
 
         # 5. Delete the document
-        delete_response = requests.delete(f"{API_BASE_URL}/rest/documents/{env}/{uuid}")
+        delete_response = requests.delete(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert delete_response.status_code == 204
 
         # 6. Verify it's deleted
-        get_deleted = requests.get(f"{API_BASE_URL}/rest/documents/{env}/{uuid}")
+        get_deleted = requests.get(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert get_deleted.status_code == 404
 
 

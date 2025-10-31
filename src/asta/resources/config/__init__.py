@@ -23,7 +23,7 @@ class ServerConfig(BaseModel):
 class PostgresStorageConfig(BaseModel):
     """PostgreSQL storage configuration"""
 
-    env_name: str = Field(description="Environment name for PostgreSQL storage")
+    namespace: str = Field(description="Namespace identifier for PostgreSQL storage")
     url: str = Field(
         default="postgresql://asta_resources:asta_resources@localhost:5432/asta_resources",
         description="PostgreSQL connection URL",
@@ -43,7 +43,7 @@ class StorageConfig(BaseModel):
 
     def document_store(self) -> PostgresDocumentStore:
         return PostgresDocumentStore(
-            env_name=self.postgres.env_name,
+            namespace=self.postgres.namespace,
             connection_string=self.postgres.url,
         )
 

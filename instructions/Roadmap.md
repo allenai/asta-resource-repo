@@ -361,7 +361,7 @@ Once MVP is built:
 - Use UUID4 for document IDs
 - Store files with hash-based names to prevent collisions
 - Implement file chunking for large uploads
-- Use SQLAlchemy ORM for database portability
+- Assume PostgreSQL backend database
 - Implement proper logging with Python's logging module
 - Use environment variables for sensitive config (API keys, DB passwords)
 - Use sentence-transformers for generating document embeddings

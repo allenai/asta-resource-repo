@@ -12,7 +12,7 @@ from asta.resources.exceptions import ValidationError
 class DocumentMetadata(BaseModel):
     """Document metadata"""
 
-    uri: str = ""  # Full URI in format asta://{env}/{uuid}
+    uri: str = ""  # Full URI in format asta://{namespace}/{resource_type}/{uuid}
     name: str | None = None
     mime_type: str
     tags: list[str] | None = None
@@ -28,11 +28,18 @@ class DocumentMetadata(BaseModel):
 
     @property
     def is_binary(self) -> bool:
-        """Check if the document is binary based on its MIME type"""
-        binary_mime_types = {
-            "application/pdf",
-        }
-        return self.mime_type in binary_mime_types
+        """Check if the document is binary based on its MIME type
+
+        Text MIME types: text/*, application/json
+        All others are considered binary
+        """
+        text_mime_prefixes = ("text/",)
+        text_mime_types = {"application/json"}
+
+        return not (
+            self.mime_type.startswith(text_mime_prefixes)
+            or self.mime_type in text_mime_types
+        )
 
 
 class Document(BaseModel):
@@ -83,7 +90,6 @@ class SearchHit(BaseModel):
     """Search result representation"""
 
     result: DocumentMetadata
-    snippet: str | None = None
 
 
 class SearchResult(BaseModel):
@@ -93,27 +99,28 @@ class SearchResult(BaseModel):
     hits: list[SearchHit]
 
 
-def parse_document_uri(uri: str) -> tuple[str, str]:
-    """Parse document URI in format asta://{env}/{uuid}
+def parse_document_uri(uri: str) -> tuple[str, str, str]:
+    """Parse document URI in format asta://{namespace}/{resource_type}/{uuid}
 
     Args:
         uri: Document URI
 
     Returns:
-        Tuple of (env, uuid)
+        Tuple of (namespace, resource_type, uuid)
 
     Raises:
-        ValueError: If the URI format is invalid
+        ValidationError: If the URI format is invalid
     """
-    pattern = r"^asta://([^/]+)/([a-f0-9-]+)$"
+    pattern = r"^asta://([^/]+)/([^/]+)/([a-f0-9-]+)$"
     match = re.match(pattern, uri, re.IGNORECASE)
 
     if not match:
         raise ValidationError(
-            f"Document URI must be in format 'asta://{{env_name}}/{{uuid}}', got: {uri}"
+            f"Document URI must be in format 'asta://{{namespace}}/{{resource_type}}/{{uuid}}', got: {uri}"
         )
 
-    env, uuid = match.groups()
+    namespace, resource_type, uuid = match.groups()
+
     # Validate UUID format
     try:
         # Validate it's a valid UUID format
@@ -124,4 +131,29 @@ def parse_document_uri(uri: str) -> tuple[str, str]:
             f"UUID part '{uuid}' is not a valid UUID."
         )
 
-    return env, uuid
+    return namespace, resource_type, uuid
+
+
+def construct_document_uri(namespace: str, resource_type: str, uuid: str) -> str:
+    """Construct a document URI in format asta://{namespace}/{resource_type}/{uuid}
+
+    Args:
+        namespace: Namespace identifier
+        resource_type: Resource type (e.g., "document", "user")
+        uuid: UUID string
+
+    Returns:
+        Full document URI
+
+    Raises:
+        ValidationError: If UUID format is invalid
+    """
+    # Validate UUID format
+    try:
+        UUID(uuid)
+    except ValueError:
+        raise ValidationError(
+            f"Invalid UUID format: {uuid}. UUID must be a valid UUID."
+        )
+
+    return f"asta://{namespace}/{resource_type}/{uuid}"

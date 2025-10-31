@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from .document_store import PostgresDocumentStore
-from .model import DocumentMetadata, Document, SearchHit
+from .model import DocumentMetadata, Document, SearchHit, construct_document_uri
 from .exceptions import (
     DocumentNotFoundError,
     InvalidMimeTypeError,
@@ -89,17 +89,18 @@ def create_rest_router(
     """
     router = APIRouter(prefix="/rest", tags=["documents"])
 
-    def _id_to_uri(env: str, doc_uuid: str) -> str:
-        """Convert env and uuid to URI
+    def _id_to_uri(namespace: str, resource_type: str, doc_uuid: str) -> str:
+        """Convert namespace, resource_type, and uuid to URI
 
         Args:
-            env: Environment name
+            namespace: Namespace identifier
+            resource_type: Resource type
             doc_uuid: Document UUID
 
         Returns:
-            Full URI in format asta://{env}/{uuid}
+            Full URI in format asta://{namespace}/{resource_type}/{uuid}
         """
-        return f"asta://{env}/{doc_uuid}"
+        return construct_document_uri(namespace, resource_type, doc_uuid)
 
     @router.post(
         "/documents",
@@ -195,21 +196,23 @@ def create_rest_router(
             )
 
     @router.get(
-        "/documents/{env}/{doc_uuid}",
+        "/documents/{namespace}/{resource_type}/{doc_uuid}",
         response_model=GetDocumentResponse,
         summary="Get a document",
-        description="Retrieve a document by its environment and UUID",
+        description="Retrieve a document by its namespace, resource type, and UUID",
     )
-    async def get_document(env: str, doc_uuid: str) -> GetDocumentResponse:
-        """Get a document by env and uuid"""
+    async def get_document(
+        namespace: str, resource_type: str, doc_uuid: str
+    ) -> GetDocumentResponse:
+        """Get a document by namespace, resource_type, and uuid"""
         try:
             # Construct URI from path parameters
-            uri = f"asta://{env}/{doc_uuid}"
+            uri = _id_to_uri(namespace, resource_type, doc_uuid)
             document = await document_store.get(uri)
 
             if document is None:
                 raise DocumentNotFoundError(
-                    f"Document with ID '{env}/{doc_uuid}' not found"
+                    f"Document with ID '{namespace}/{resource_type}/{doc_uuid}' not found"
                 )
 
             serializable = document.to_serializable()
@@ -275,22 +278,22 @@ def create_rest_router(
             )
 
     @router.delete(
-        "/documents/{env}/{doc_uuid}",
+        "/documents/{namespace}/{resource_type}/{doc_uuid}",
         status_code=status.HTTP_204_NO_CONTENT,
         summary="Delete a document",
-        description="Delete a document by its environment and UUID",
+        description="Delete a document by its namespace, resource type, and UUID",
     )
-    async def delete_document(env: str, doc_uuid: str) -> None:
+    async def delete_document(namespace: str, resource_type: str, doc_uuid: str) -> None:
         """Delete a document"""
         try:
             # Construct URI from path parameters
-            uri = f"asta://{env}/{doc_uuid}"
+            uri = _id_to_uri(namespace, resource_type, doc_uuid)
 
             # Check if document exists
             document = await document_store.get(uri)
             if document is None:
                 raise DocumentNotFoundError(
-                    f"Document with ID '{env}/{doc_uuid}' not found"
+                    f"Document with ID '{namespace}/{resource_type}/{doc_uuid}' not found"
                 )
 
             await document_store.delete(uri)

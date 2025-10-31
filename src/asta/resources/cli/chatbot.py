@@ -17,57 +17,96 @@ import asyncio
 import base64
 import json
 import os
+import sys
+from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 import anthropic
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 
-class DocumentChatbot:
-    """Interactive chatbot with MCP document tools and Claude API"""
+@dataclass
+class ServerConfig:
+    """Configuration for an MCP server connection
 
-    def __init__(self, api_key: Optional[str] = None):
+    Attributes:
+        name: Unique identifier for this server
+        command: Command to execute (e.g., "sh", "uv")
+        args: Arguments to pass to the command
+        env: Environment variables to set (optional)
+    """
+    name: str
+    command: str
+    args: List[str]
+    env: Optional[Dict[str, str]] = None
+
+
+class DevChatbot:
+    """Basic CLI chatbot for local testint"""
+
+    def __init__(self, api_key: Optional[str] = None, server_configs: Optional[List[ServerConfig]] = None):
         """Initialize the chatbot
 
         Args:
             api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
+            server_configs: List of MCP server configurations to connect to
         """
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        if not self.api_key:
-            print("Warning: No ANTHROPIC_API_KEY found. Chat features will be limited.")
 
         self.client = (
             anthropic.Anthropic(api_key=self.api_key) if self.api_key else None
         )
-        self.session: Optional[ClientSession] = None
-        self.available_tools = []
+
+        # Multiple server support
+        self.server_configs = server_configs or []
+        self.sessions: Dict[str, ClientSession] = {}  # server_name -> session
+        self.tool_to_server: Dict[str, str] = {}  # tool_name -> server_name
+        self.available_tools = []  # All tools from all servers
+
+    def _get_session_for_tool(self, tool_name: str) -> Optional[ClientSession]:
+        """Get the session for a specific tool
+
+        Args:
+            tool_name: Name of the tool
+
+        Returns:
+            The ClientSession that provides this tool, or None if not found
+        """
+        server_name = self.tool_to_server.get(tool_name)
+        if not server_name:
+            return None
+        return self.sessions.get(server_name)
 
     async def list_documents(self) -> list:
         """List all documents"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
+        session = self._get_session_for_tool("list_documents")
+        if not session:
+            raise RuntimeError("list_documents tool not available on any server")
 
-        result = await self.session.call_tool("list_documents", {})
+        result = await session.call_tool("list_documents", {})
         return json.loads(result.content[0].text) if result.content else []
 
     async def search_documents(self, query: str, limit: int = 10) -> list:
         """Search documents"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
+        session = self._get_session_for_tool("search_documents")
+        if not session:
+            raise RuntimeError("search_documents tool not available on any server")
 
-        result = await self.session.call_tool(
+        result = await session.call_tool(
             "search_documents", {"query": query, "limit": limit}
         )
         return json.loads(result.content[0].text) if result.content else []
 
     async def get_document(self, document_uri: str) -> Optional[dict]:
         """Get a specific document"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
+        session = self._get_session_for_tool("get_document")
+        if not session:
+            raise RuntimeError("get_document tool not available on any server")
 
-        result = await self.session.call_tool(
+        result = await session.call_tool(
             "get_document", {"document_uri": document_uri}
         )
         return json.loads(result.content[0].text) if result.content else None
@@ -79,8 +118,9 @@ class DocumentChatbot:
         extra_metadata: Optional[dict] = None,
     ) -> dict:
         """Upload a document"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
+        session = self._get_session_for_tool("upload_document")
+        if not session:
+            raise RuntimeError("upload_document tool not available on any server")
 
         # Read the file
         path = Path(filepath)
@@ -105,7 +145,7 @@ class DocumentChatbot:
             content = base64.b64encode(content_bytes).decode("ascii")
 
         # Upload
-        result = await self.session.call_tool(
+        result = await session.call_tool(
             "upload_document",
             {
                 "content": content,
@@ -123,6 +163,7 @@ class DocumentChatbot:
 📚 Document Chatbot Commands:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   /help              Show this help message
+  /servers           Show connected MCP servers
   /list              List all documents
   /search <query>    Search documents (e.g., /search python)
   /get <uri>         Get document by URI
@@ -146,6 +187,20 @@ class DocumentChatbot:
         if user_input == "/help":
             self.print_help()
             return ""
+
+        elif user_input == "/servers":
+            if not self.sessions:
+                return "📭 No MCP servers connected."
+
+            response = f"🔌 Connected to {len(self.sessions)} MCP server(s):\n"
+            for server_name, session in self.sessions.items():
+                # Count tools for this server
+                tool_count = sum(1 for tool_name, srv in self.tool_to_server.items() if srv == server_name)
+                response += f"\n  • {server_name}"
+                response += f"\n    Tools: {tool_count}"
+
+            response += f"\n\nTotal tools available: {len(self.available_tools)}"
+            return response
 
         elif user_input == "/list":
             docs = await self.list_documents()
@@ -250,7 +305,7 @@ class DocumentChatbot:
 
             # Call Claude with tools
             response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-20250514",
                 max_tokens=4096,
                 tools=tools,
                 messages=[{"role": "user", "content": message}],
@@ -264,8 +319,20 @@ class DocumentChatbot:
                     if block.type == "tool_use":
                         print(f"🔧 Using tool: {block.name}")
 
+                        # Get the appropriate session for this tool
+                        session = self._get_session_for_tool(block.name)
+                        if not session:
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": block.id,
+                                    "content": f"Error: Tool {block.name} not available on any server",
+                                }
+                            )
+                            continue
+
                         # Call the MCP tool
-                        result = await self.session.call_tool(block.name, block.input)
+                        result = await session.call_tool(block.name, block.input)
                         tool_results.append(
                             {
                                 "type": "tool_result",
@@ -286,7 +353,7 @@ class DocumentChatbot:
                 ]
 
                 response = self.client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
+                    model="claude-sonnet-4-20250514",
                     max_tokens=4096,
                     tools=tools,
                     messages=messages,
@@ -301,114 +368,127 @@ class DocumentChatbot:
         except Exception as e:
             return f"❌ Error calling Claude: {e}"
 
-    async def run(self):
-        """Run the interactive chatbot loop"""
-        print("=" * 70)
-        print("📚 Document Chatbot with MCP Tools")
-        print("=" * 70)
-        print("🔌 Connecting to MCP server...")
+    async def _connect_to_server(self, config: ServerConfig, exit_stack: AsyncExitStack) -> None:
+        """Connect to an MCP server and register its tools
 
-        # Configure the MCP server to connect to
-        # Use the dedicated MCP-only server for stdio mode
-        import os
+        Args:
+            config: Server configuration
+            exit_stack: AsyncExitStack to manage the connection lifecycle
+        """
+        # Create server parameters
+        server_env = os.environ.copy()
+        server_env["PYTHONUNBUFFERED"] = "1"
+        server_env["FASTMCP_LOG_LEVEL"] = "WARNING"
 
-        env = os.environ.copy()
-        env["PYTHONUNBUFFERED"] = "1"
+        # Add any custom environment variables from config
+        if config.env:
+            server_env.update(config.env)
 
         server_params = StdioServerParameters(
-            command="uv", args=["run", "asta-resources-mcp"], env=env
+            command="sh",
+            args=["-c", f"{config.command} {' '.join(config.args)} 2>/dev/null"],
+            env=server_env
         )
 
-        # Run the chatbot within the MCP client context
-        import sys
-        import asyncio
+        print(f"🔌 Connecting to {config.name}...")
 
-        print("🔄 Creating stdio client...", file=sys.stderr)
-        async with stdio_client(server_params, errlog=sys.stderr) as (read, write):
-            print("✅ Stdio client created", file=sys.stderr)
-            print(f"   Read stream: {type(read)}", file=sys.stderr)
-            print(f"   Write stream: {type(write)}", file=sys.stderr)
+        # Connect to the server
+        read, write = await exit_stack.enter_async_context(stdio_client(server_params))
+        session = await exit_stack.enter_async_context(ClientSession(read, write))
 
-            # Create session as async context manager
-            print("🔄 Creating MCP session...", file=sys.stderr)
-            async with ClientSession(read, write) as session:
-                self.session = session
-                print("✅ MCP session created", file=sys.stderr)
+        # Initialize the connection with timeout
+        try:
+            await asyncio.wait_for(session.initialize(), timeout=10.0)
+        except asyncio.TimeoutError:
+            print(f"❌ Timeout connecting to {config.name}")
+            raise
+        except Exception as e:
+            print(f"❌ Error connecting to {config.name}: {e}")
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            raise
 
-                print(
-                    "🔄 Initializing MCP session (this may take a moment)...",
-                    file=sys.stderr,
+        # Store the session
+        self.sessions[config.name] = session
+
+        # List available tools and register them
+        tools_result = await session.list_tools()
+        for tool in tools_result.tools:
+            self.tool_to_server[tool.name] = config.name
+            self.available_tools.append(tool)
+
+        print(f"✅ Connected to {config.name} ({len(tools_result.tools)} tools)")
+
+    async def run(self):
+        """Run the interactive chatbot loop with multiple MCP servers"""
+        # Use default config if none provided
+        if not self.server_configs:
+            # Default to the asta-resources MCP server
+            env = os.environ.copy()
+            self.server_configs = [
+                ServerConfig(
+                    name="asta-resources",
+                    command="uv",
+                    args=["run", "asta-resources-mcp"],
+                    env={"PYTHONUNBUFFERED": "1", "FASTMCP_LOG_LEVEL": "WARNING"}
+                ),
+                ServerConfig(
+                    name="asta-paper-finder",
+                    command="uv",
+                    args=["run", "--directory", "/Users/rodneyk/workspace/nora/mcp", "paper_finder_server.py"],
                 )
-                # Initialize the connection with timeout
+            ]
+
+        # Connect to all servers using AsyncExitStack
+        async with AsyncExitStack() as exit_stack:
+            # Connect to all configured servers
+            for config in self.server_configs:
                 try:
-                    # Add a timeout to see if it's truly hanging or just slow
-                    await asyncio.wait_for(session.initialize(), timeout=10.0)
-                    print("✅ MCP session initialized!", file=sys.stderr)
-                except asyncio.TimeoutError:
-                    print(
-                        "❌ Initialization timed out after 10 seconds", file=sys.stderr
-                    )
-                    print(
-                        "   This suggests the server isn't responding to the initialize request",
-                        file=sys.stderr,
-                    )
-                    raise
+                    await self._connect_to_server(config, exit_stack)
                 except Exception as e:
-                    print(
-                        f"❌ Failed to initialize: {type(e).__name__}: {e}",
-                        file=sys.stderr,
-                    )
-                    import traceback
+                    print(f"⚠️  Failed to connect to {config.name}: {e}")
+                    # Continue with other servers
 
-                    traceback.print_exc(file=sys.stderr)
-                    raise
+            # Check if we have any active sessions
+            if not self.sessions:
+                print("❌ No MCP servers connected. Exiting.")
+                return
 
-                # List available tools
-                tools_result = await session.list_tools()
-                self.available_tools = tools_result.tools
+            print(f"\n🎉 Ready! Connected to {len(self.sessions)} server(s) with {len(self.available_tools)} tool(s) total.\n")
 
-                print(f"✅ Connected! Found {len(self.available_tools)} tools:")
-                for tool in self.available_tools:
-                    print(f"   • {tool.name}: {tool.description}")
-                print()
-
-                # Show help
-                self.print_help()
-
-                # Main loop
-                while True:
+            # Main loop
+            while True:
+                try:
+                    # Get user input
                     try:
-                        # Get user input
                         user_input = input("\n💬 You: ").strip()
-
-                        if not user_input:
-                            continue
-
-                        # Handle the command/message
-                        response = await self.handle_command(user_input)
-
-                        # Check for quit
-                        if response == "__QUIT__":
-                            print("\n👋 Goodbye!")
-                            break
-
-                        # Display response
-                        if response:
-                            print(f"\n🤖 Assistant: {response}")
-
-                    except KeyboardInterrupt:
-                        print("\n\n👋 Goodbye!")
+                    except EOFError:
                         break
-                    except Exception as e:
-                        print(f"\n❌ Error: {e}")
-                        import traceback
 
-                        traceback.print_exc()
+                    # Handle the command/message
+                    response = await self.handle_command(user_input)
+
+                    # Check for quit
+                    if response == "__QUIT__":
+                        print("\n👋 Goodbye!")
+                        break
+
+                    # Display response
+                    if response:
+                        print(f"\n🤖 Asta: {response}")
+
+                except KeyboardInterrupt:
+                    print("\n\n👋 Goodbye!")
+                    break
+                except Exception as e:
+                    print(f"\n❌ Error: {e}")
+                    import traceback
+                    traceback.print_exc()
 
 
 async def async_main():
     """Async main entry point"""
-    chatbot = DocumentChatbot()
+    chatbot = DevChatbot()
     await chatbot.run()
 
 

@@ -197,10 +197,10 @@ class TestRestAPIGetDocument:
             },
         )
         doc_uri = upload_response.json()["uri"]
-        env, uuid = parse_document_uri(doc_uri)
+        namespace, resource_type, uuid = parse_document_uri(doc_uri)
 
         # Then retrieve it
-        response = await client.get(f"/rest/documents/{env}/{uuid}")
+        response = await client.get(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
 
         assert response.status_code == 200
         data = response.json()
@@ -211,9 +211,13 @@ class TestRestAPIGetDocument:
         assert data["size_bytes"] == 12
 
     @pytest.mark.asyncio
-    async def test_get_nonexistent_document(self, client):
+    async def test_get_nonexistent_document(self, client, document_store):
         """Test retrieving a document that doesn't exist"""
-        response = await client.get("/rest/documents/nonexistent-id")
+        import uuid
+        fake_uuid = str(uuid.uuid4())
+        namespace = document_store.namespace
+        resource_type = document_store.resource_type
+        response = await client.get(f"/rest/documents/{namespace}/{resource_type}/{fake_uuid}")
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
@@ -368,21 +372,25 @@ class TestRestAPIDeleteDocument:
             },
         )
         doc_uri = upload_response.json()["uri"]
-        env, uuid = parse_document_uri(doc_uri)
+        namespace, resource_type, uuid = parse_document_uri(doc_uri)
 
         # Delete the document
-        response = await client.delete(f"/rest/documents/{env}/{uuid}")
+        response = await client.delete(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
 
         assert response.status_code == 204
 
         # Verify it's deleted
-        get_response = await client.get(f"/rest/documents/{env}/{uuid}")
+        get_response = await client.get(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert get_response.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_delete_nonexistent_document(self, client):
+    async def test_delete_nonexistent_document(self, client, document_store):
         """Test deleting a document that doesn't exist"""
-        response = await client.delete("/rest/documents/nonexistent-id")
+        import uuid
+        fake_uuid = str(uuid.uuid4())
+        namespace = document_store.namespace
+        resource_type = document_store.resource_type
+        response = await client.delete(f"/rest/documents/{namespace}/{resource_type}/{fake_uuid}")
 
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
@@ -421,10 +429,10 @@ class TestRestAPIEndToEnd:
         )
         assert upload_response.status_code == 201
         doc_uri = upload_response.json()["uri"]
-        env, uuid = parse_document_uri(doc_uri)
+        namespace, resource_type, uuid = parse_document_uri(doc_uri)
 
         # 2. Retrieve the document
-        get_response = await client.get(f"/rest/documents/{env}/{uuid}")
+        get_response = await client.get(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert get_response.status_code == 200
         assert get_response.json()["filename"] == "lifecycle.txt"
 
@@ -443,11 +451,11 @@ class TestRestAPIEndToEnd:
         assert len(search_response.json()["results"]) >= 1
 
         # 5. Delete the document
-        delete_response = await client.delete(f"/rest/documents/{env}/{uuid}")
+        delete_response = await client.delete(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert delete_response.status_code == 204
 
         # 6. Verify it's gone
-        get_deleted_response = await client.get(f"/rest/documents/{env}/{uuid}")
+        get_deleted_response = await client.get(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
         assert get_deleted_response.status_code == 404
 
     @pytest.mark.asyncio
@@ -483,8 +491,8 @@ class TestRestAPIEndToEnd:
         assert len(search_response.json()["results"]) >= 3
 
         # Delete one document
-        env, uuid = parse_document_uri(doc_uris[1])
-        await client.delete(f"/rest/documents/{env}/{uuid}")
+        namespace, resource_type, uuid = parse_document_uri(doc_uris[1])
+        await client.delete(f"/rest/documents/{namespace}/{resource_type}/{uuid}")
 
         # Verify count is now 2
         list_response = await client.get("/rest/documents")

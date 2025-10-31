@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The Asta Resource Repository is an MCP (Model Context Protocol) server that provides centralized document storage with PostgreSQL backend. It exposes both MCP tools (for Claude Desktop/Code) and REST API endpoints for document management operations.
 
-**Key Concept**: Documents are identified by URIs in the format `asta://{env_name}/{uuid}`, where `env_name` is the environment identifier (e.g., "local-postgres") and `uuid` is the document's unique identifier.
+**Key Concept**: Documents are identified by URIs in the format `asta://{namespace}/{resource_type}/{uuid}`, where `namespace` is the namespace identifier (e.g., "local-postgres"), `resource_type` is the resource type (e.g., "document" for uploaded documents, "user" for users), and `uuid` is the resource's unique identifier.
 
 ## Architecture
 
@@ -41,10 +41,14 @@ Configuration uses HOCON format (Human-Optimized Config Object Notation) with en
 - Environment-specific config loaded via `ENV` environment variable
 - Key configurations:
   - `server.host`, `server.port`: Server binding
+  - `storage.postgres.namespace`: Namespace identifier for URIs
+  - `storage.postgres.resource_type`: Resource type for documents (default: "document")
   - `storage.postgres.url`: PostgreSQL connection string
   - `limits.max_file_size_mb`: Document size limit
 
 Environment variables override config values:
+- `NAMESPACE`: Override namespace identifier
+- `RESOURCE_TYPE`: Override resource type
 - `POSTGRES_URL`: Override database connection
 - `POSTGRES_HOST`, `POSTGRES_PORT`: Individual connection parameters
 - `SERVER_PORT`: Override server port
@@ -153,10 +157,12 @@ uv run asta-resources-server --reload
 
 ### Database Setup
 
-PostgreSQL database setup is automatic via `migrations/001_create_documents_table.sql` which runs on container startup. The schema includes:
+PostgreSQL database setup is automatic via `migrations/001_initial_schema.sql` which runs on container startup. The schema includes:
 - `documents` table: Stores document metadata and content as bytea
 - Full-text search using `to_tsvector` on content
 - Indexes on URI and search vectors
+
+Modify the `migrations/001_initial_schema.sql` file in place for schema changes, instead of adding new .sql files.
 
 ## Testing Strategy
 
@@ -297,7 +303,7 @@ Search uses PostgreSQL full-text search with `ts_rank` for relevance scoring.
 
 - **Always use `uv run`**: This project uses `uv` for dependency management
 - **Port 15432**: PostgreSQL runs on non-standard port to avoid conflicts
-- **URI Format**: All document URIs must follow `asta://{env_name}/{uuid}` format
+- **URI Format**: All document URIs must follow `asta://{namespace}/{resource_type}/{uuid}` format
 - **Environment Variable Config**: Most settings can be overridden via environment variables
 - **Async/Await**: All database operations are async using `asyncpg`
 - **Connection Pooling**: PostgreSQL uses connection pool managed by FastMCP lifespan

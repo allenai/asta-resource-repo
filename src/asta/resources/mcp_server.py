@@ -5,20 +5,24 @@ This is the dedicated MCP server without REST API components.
 """
 
 import logging
+import os
+
+# Configure logging BEFORE importing FastMCP to suppress its banner and logs
+logging.basicConfig(level=logging.WARN, force=True)
+logging.getLogger().setLevel(logging.WARN)
+
+# Suppress FastMCP banner by setting environment variable
+os.environ["FASTMCP_NO_BANNER"] = "1"
 
 from .config import load_config
 from .mcp_tools import create_mcp_server
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # Configuration constants
 ALLOWED_MIME_TYPES = {"application/json", "application/pdf", "text/plain"}
 
+logger = logging.getLogger(__name__)
 
 def main():
-    """Main entry point - FastMCP's run() handles its own event loop"""
     logger.info("Starting MCP-only server in stdio mode")
 
     # Load configuration

@@ -52,7 +52,7 @@ def create_mcp_server(
         "asta-resource-repository",
         instructions=(
             f"This MCP server provides tools for managing documents in the Asta Resource Repository. "
-            f"Use these tools to handle URIs of the form asta://{document_store.env_name}/{{document_id}}."
+            f"Use these tools to handle URIs of the form asta://{document_store.namespace}/{document_store.resource_type}/{{document_id}}."
         ),
         lifespan=app_lifespan,
     )
@@ -76,7 +76,7 @@ def create_mcp_server(
         """Get a specific document by URI
 
         Args:
-            document_uri: Document URI in format asta://{env}/{uuid}
+            document_uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
 
         Returns:
             Document object with metadata and content, or None if not found
