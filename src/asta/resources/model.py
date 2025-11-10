@@ -20,6 +20,7 @@ class DocumentMetadata(BaseModel):
     modified_at: datetime | None = None
     extra: dict[str, Any] | None = None
     size: int = 0
+    owner_uri: str | None = None  # User URI in format asta://{namespace}/user/{uuid}
 
     @field_serializer("created_at", "modified_at")
     def serialize_datetime(self, dt: datetime | None) -> str | None:

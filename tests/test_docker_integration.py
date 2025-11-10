@@ -16,6 +16,9 @@ import requests
 # Base URL for Docker deployment
 API_BASE_URL = "http://localhost:8000"
 
+# Test user URI for authentication
+TEST_USER_URI = "asta://local-postgres/user/00000000-0000-0000-0000-000000000001"
+
 
 @pytest.fixture(scope="module")
 def wait_for_api():
@@ -57,6 +60,9 @@ class TestDockerDeployment:
 
     def test_basic_document_workflow(self, wait_for_api):
         """Test basic document upload, retrieve, and delete"""
+        # Set up headers with authentication
+        headers = {"Authorization": f"Bearer {TEST_USER_URI}"}
+
         # 1. Upload a document
         upload_response = requests.post(
             f"{API_BASE_URL}/rest/documents",
@@ -65,6 +71,7 @@ class TestDockerDeployment:
                 "filename": "docker_test.txt",
                 "mime_type": "text/plain",
             },
+            headers=headers,
         )
         assert upload_response.status_code == 201
         doc_uri = upload_response.json()["uri"]
@@ -76,12 +83,15 @@ class TestDockerDeployment:
         uuid = uri_parts[2]
 
         # 2. Retrieve the document
-        get_response = requests.get(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
+        get_response = requests.get(
+            f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}",
+            headers=headers,
+        )
         assert get_response.status_code == 200
         assert get_response.json()["filename"] == "docker_test.txt"
 
         # 3. List documents (should include our document)
-        list_response = requests.get(f"{API_BASE_URL}/rest/documents")
+        list_response = requests.get(f"{API_BASE_URL}/rest/documents", headers=headers)
         assert list_response.status_code == 200
         assert list_response.json()["total"] >= 1
 
@@ -89,16 +99,23 @@ class TestDockerDeployment:
         search_response = requests.post(
             f"{API_BASE_URL}/rest/documents/search",
             json={"query": "Docker", "limit": 10},
+            headers=headers,
         )
         assert search_response.status_code == 200
         assert len(search_response.json()["results"]) >= 1
 
         # 5. Delete the document
-        delete_response = requests.delete(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
+        delete_response = requests.delete(
+            f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}",
+            headers=headers,
+        )
         assert delete_response.status_code == 204
 
         # 6. Verify it's deleted
-        get_deleted = requests.get(f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}")
+        get_deleted = requests.get(
+            f"{API_BASE_URL}/rest/documents/{namespace}/{resource_type}/{uuid}",
+            headers=headers,
+        )
         assert get_deleted.status_code == 404
 
 

@@ -19,12 +19,14 @@ class AppContext:
     """Application context with initialized dependencies."""
 
     document_store: PostgresDocumentStore
+    user_uri: str | None = None  # User URI for stdio mode (fixed for session)
 
 
 def create_mcp_server(
     document_store: PostgresDocumentStore,
     max_file_size_bytes: int,
     allowed_mime_types: set[str],
+    user_uri: str | None = None,
 ) -> FastMCP:
     """Create MCP server with all tools
 
@@ -32,6 +34,7 @@ def create_mcp_server(
         document_store: Document store instance
         max_file_size_bytes: Maximum file size in bytes
         allowed_mime_types: Set of allowed MIME types
+        user_uri: User URI for authentication (required for stdio mode, optional for HTTP mode)
 
     Returns:
         Configured FastMCP server
@@ -43,7 +46,7 @@ def create_mcp_server(
         # Initialize document store connection pool on startup
         await document_store.initialize()
         try:
-            yield AppContext(document_store=document_store)
+            yield AppContext(document_store=document_store, user_uri=user_uri)
         finally:
             # Cleanup on shutdown
             await document_store.close()
@@ -67,8 +70,16 @@ def create_mcp_server(
 
         Returns:
             List of search hits with document metadata and snippets
+
+        Raises:
+            ValidationError: If user is not authenticated
         """
-        hits = await document_store.search(query, limit)
+        if not user_uri:
+            raise ValidationError(
+                "Authentication required: User URI not configured. "
+                "Set ASTA_USER environment variable."
+            )
+        hits = await document_store.search(query, user_uri, limit)
         return hits
 
     @mcp.tool()
@@ -80,8 +91,16 @@ def create_mcp_server(
 
         Returns:
             Document object with metadata and content, or None if not found
+
+        Raises:
+            ValidationError: If user is not authenticated
         """
-        document = await document_store.get(document_uri)
+        if not user_uri:
+            raise ValidationError(
+                "Authentication required: User URI not configured. "
+                "Set ASTA_USER environment variable."
+            )
+        document = await document_store.get(document_uri, user_uri)
         return document.to_serializable() if document else None
 
     @mcp.tool()
@@ -90,8 +109,16 @@ def create_mcp_server(
 
         Returns:
             List of document metadata for all documents
+
+        Raises:
+            ValidationError: If user is not authenticated
         """
-        documents = await document_store.list_docs()
+        if not user_uri:
+            raise ValidationError(
+                "Authentication required: User URI not configured. "
+                "Set ASTA_USER environment variable."
+            )
+        documents = await document_store.list_docs(user_uri)
         return documents
 
     @mcp.tool()
@@ -115,8 +142,15 @@ def create_mcp_server(
         Raises:
             InvalidMimeTypeError: If the MIME type is not supported
             DocumentTooLargeError: If the document exceeds the maximum allowed size
-            ValidationError: If input validation fails
+            ValidationError: If input validation fails or user is not authenticated
         """
+        # Check authentication
+        if not user_uri:
+            raise ValidationError(
+                "Authentication required: User URI not configured. "
+                "Set ASTA_USER environment variable."
+            )
+
         # Validate inputs
         if not filename or not filename.strip():
             raise ValidationError("Filename cannot be empty")
@@ -177,7 +211,7 @@ def create_mcp_server(
             content=content,
         ).to_binary()
 
-        doc_metadata.uri = await document_store.store(document)
+        doc_metadata.uri = await document_store.store(document, user_uri)
         return doc_metadata
 
     return mcp

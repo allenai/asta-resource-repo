@@ -15,6 +15,7 @@ from ..model import (
     construct_document_uri,
 )
 from ..exceptions import ValidationError
+from ..auth import validate_user_uri
 
 
 class PostgresDocumentStore:
@@ -101,8 +102,62 @@ class PostgresDocumentStore:
 
         return uuid_part
 
-    async def store(self, document: BinaryDocument) -> str:
-        """Store a document and return its URI in format asta://{namespace}/{resource_type}/{uuid}"""
+    async def _get_or_create_user(self, user_uri: str) -> int:
+        """Get or create a user by their user URI and return the user's database ID
+
+        Args:
+            user_uri: User URI in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            The database ID (bigint) of the user
+
+        Raises:
+            ValidationError: If user URI format is invalid
+        """
+        # Validate user URI and extract UUID
+        validated_uri, user_uuid = validate_user_uri(user_uri)
+
+        pool = await self._get_pool()
+
+        async with pool.acquire() as conn:
+            # Try to get existing user
+            row = await conn.fetchrow(
+                "SELECT id FROM users WHERE uuid = $1",
+                user_uuid,
+            )
+
+            if row is not None:
+                return row["id"]
+
+            # Create new user if doesn't exist
+            row = await conn.fetchrow(
+                """
+                INSERT INTO users (uuid, created_at)
+                VALUES ($1, NOW())
+                ON CONFLICT (uuid) DO UPDATE SET uuid = EXCLUDED.uuid
+                RETURNING id
+                """,
+                user_uuid,
+            )
+
+            return row["id"]
+
+    async def store(self, document: BinaryDocument, owner_uri: str) -> str:
+        """Store a document and return its URI in format asta://{namespace}/{resource_type}/{uuid}
+
+        Args:
+            document: The document to store
+            owner_uri: User URI of the document owner in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            The document URI
+
+        Raises:
+            ValidationError: If owner_uri format is invalid
+        """
+        # Get or create the user and get their database ID
+        owner_id = await self._get_or_create_user(owner_uri)
+
         pool = await self._get_pool()
         doc_uuid = str(uuid.uuid4())
 
@@ -111,6 +166,7 @@ class PostgresDocumentStore:
 
         # Set metadata fields
         document.metadata.uri = doc_uri
+        document.metadata.owner_uri = owner_uri
         if document.metadata.created_at is None:
             document.metadata.created_at = datetime.now()
         if document.metadata.modified_at is None:
@@ -131,8 +187,8 @@ class PostgresDocumentStore:
                 """
                 INSERT INTO documents (
                     uuid, name, mime_type, tags, created_at, modified_at,
-                    extra, size, binary_content, text_content
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    extra, size, binary_content, text_content, owner_id
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 """,
                 doc_uuid,  # Store UUID in database
                 document.metadata.name,
@@ -148,15 +204,20 @@ class PostgresDocumentStore:
                 document.metadata.size,
                 binary_content,
                 text_content,
+                owner_id,
             )
 
         return doc_uri
 
-    async def get(self, uri: str) -> Optional[BinaryDocument]:
+    async def get(self, uri: str, owner_uri: str) -> Optional[BinaryDocument]:
         """Retrieve a document by URI
 
         Args:
             uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            owner_uri: User URI of the requesting user in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            The document if found and owned by the user, None otherwise
 
         Raises:
             ValidationError: If URI format is invalid or namespace/resource_type doesn't match
@@ -164,17 +225,22 @@ class PostgresDocumentStore:
         # Validate and extract UUID
         doc_uuid = self._validate_uri_and_extract_uuid(uri)
 
+        # Get the user's database ID
+        owner_id = await self._get_or_create_user(owner_uri)
+
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT uuid, name, mime_type, tags, created_at, modified_at,
-                       extra, size, binary_content, text_content
-                FROM documents
-                WHERE uuid = $1
+                SELECT d.uuid, d.name, d.mime_type, d.tags, d.created_at, d.modified_at,
+                       d.extra, d.size, d.binary_content, d.text_content, u.uuid as owner_uuid
+                FROM documents d
+                JOIN users u ON d.owner_id = u.id
+                WHERE d.uuid = $1 AND d.owner_id = $2
                 """,
                 doc_uuid,
+                owner_id,
             )
 
         if row is None:
@@ -182,42 +248,72 @@ class PostgresDocumentStore:
 
         return self._row_to_raw_document(row)
 
-    async def list_docs(self) -> list[DocumentMetadata]:
-        """List all documents"""
+    async def list_docs(self, owner_uri: str) -> list[DocumentMetadata]:
+        """List all documents owned by the user
+
+        Args:
+            owner_uri: User URI of the requesting user in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            List of document metadata for documents owned by the user
+        """
+        # Get the user's database ID
+        owner_id = await self._get_or_create_user(owner_uri)
+
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT uuid, name, mime_type, tags, created_at, modified_at,
-                       extra, size
-                FROM documents
-                ORDER BY created_at DESC
-                """
+                SELECT d.uuid, d.name, d.mime_type, d.tags, d.created_at, d.modified_at,
+                       d.extra, d.size, u.uuid as owner_uuid
+                FROM documents d
+                JOIN users u ON d.owner_id = u.id
+                WHERE d.owner_id = $1
+                ORDER BY d.created_at DESC
+                """,
+                owner_id,
             )
 
         return [self._row_to_metadata(row) for row in rows]
 
-    async def search(self, query: str, limit: int = 10) -> list[SearchHit]:
-        """Search documents by query"""
+    async def search(
+        self, query: str, owner_uri: str, limit: int = 10
+    ) -> list[SearchHit]:
+        """Search documents owned by the user by query
+
+        Args:
+            query: Search query string
+            owner_uri: User URI of the requesting user in format asta://{namespace}/user/{uuid}
+            limit: Maximum number of results to return
+
+        Returns:
+            List of search hits for documents owned by the user
+        """
+        # Get the user's database ID
+        owner_id = await self._get_or_create_user(owner_uri)
+
         pool = await self._get_pool()
         query_pattern = f"%{query.lower()}%"
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT uuid, name, mime_type, tags, created_at, modified_at,
-                       extra, size, binary_content, text_content
-                FROM documents
-                WHERE
-                    LOWER(name) LIKE $1
-                    OR LOWER(text_content) LIKE $1
-                    OR LOWER(convert_from(binary_content, 'UTF8')) LIKE $1
-                    OR LOWER(extra::text) LIKE $1
-                    OR tags::text ILIKE $1
-                ORDER BY created_at DESC
-                LIMIT $2
+                SELECT d.uuid, d.name, d.mime_type, d.tags, d.created_at, d.modified_at,
+                       d.extra, d.size, d.binary_content, d.text_content, u.uuid as owner_uuid
+                FROM documents d
+                JOIN users u ON d.owner_id = u.id
+                WHERE d.owner_id = $1 AND (
+                    LOWER(d.name) LIKE $2
+                    OR LOWER(d.text_content) LIKE $2
+                    OR LOWER(convert_from(d.binary_content, 'UTF8')) LIKE $2
+                    OR LOWER(d.extra::text) LIKE $2
+                    OR d.tags::text ILIKE $2
+                )
+                ORDER BY d.created_at DESC
+                LIMIT $3
                 """,
+                owner_id,
                 query_pattern,
                 limit,
             )
@@ -229,34 +325,46 @@ class PostgresDocumentStore:
 
         return results
 
-    async def delete(self, uri: str) -> bool:
-        """Delete a document by URI, return True if deleted
+    async def delete(self, uri: str, owner_uri: str) -> bool:
+        """Delete a document by URI if owned by the user, return True if deleted
 
         Args:
             uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            owner_uri: User URI of the requesting user in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            True if document was deleted, False if not found or not owned by user
 
         Raises:
             ValidationError: If URI format is invalid or namespace/resource_type doesn't match
         """
         # Validate and extract UUID
         doc_uuid = self._validate_uri_and_extract_uuid(uri)
+
+        # Get the user's database ID
+        owner_id = await self._get_or_create_user(owner_uri)
 
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM documents WHERE uuid = $1",
+                "DELETE FROM documents WHERE uuid = $1 AND owner_id = $2",
                 doc_uuid,
+                owner_id,
             )
 
         # result is like "DELETE 1" or "DELETE 0"
         return result.endswith("1")
 
-    async def exists(self, uri: str) -> bool:
-        """Check if a document exists
+    async def exists(self, uri: str, owner_uri: str) -> bool:
+        """Check if a document exists and is owned by the user
 
         Args:
             uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            owner_uri: User URI of the requesting user in format asta://{namespace}/user/{uuid}
+
+        Returns:
+            True if document exists and is owned by user, False otherwise
 
         Raises:
             ValidationError: If URI format is invalid or namespace/resource_type doesn't match
@@ -264,12 +372,16 @@ class PostgresDocumentStore:
         # Validate and extract UUID
         doc_uuid = self._validate_uri_and_extract_uuid(uri)
 
+        # Get the user's database ID
+        owner_id = await self._get_or_create_user(owner_uri)
+
         pool = await self._get_pool()
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT 1 FROM documents WHERE uuid = $1",
+                "SELECT 1 FROM documents WHERE uuid = $1 AND owner_id = $2",
                 doc_uuid,
+                owner_id,
             )
 
         return row is not None
@@ -281,6 +393,14 @@ class PostgresDocumentStore:
             self.namespace, self.resource_type, row["uuid"]
         )
 
+        # Construct owner URI from owner_uuid (if present in row from JOIN)
+        owner_uri = None
+        if "owner_uuid" in row and row["owner_uuid"]:
+            # User URIs use "user" as resource_type, not the document resource_type
+            owner_uri = construct_document_uri(
+                self.namespace, "user", row["owner_uuid"]
+            )
+
         return DocumentMetadata(
             uri=doc_uri,
             name=row["name"],
@@ -290,6 +410,7 @@ class PostgresDocumentStore:
             modified_at=row["modified_at"],
             extra=json.loads(row["extra"]) if row["extra"] else None,
             size=row["size"],
+            owner_uri=owner_uri,
         )
 
     def _row_to_raw_document(self, row: asyncpg.Record) -> BinaryDocument:

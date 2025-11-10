@@ -19,7 +19,7 @@ import json
 import os
 import sys
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -38,6 +38,7 @@ class ServerConfig:
         args: Arguments to pass to the command
         env: Environment variables to set (optional)
     """
+
     name: str
     command: str
     args: List[str]
@@ -47,7 +48,11 @@ class ServerConfig:
 class DevChatbot:
     """Basic CLI chatbot for local testint"""
 
-    def __init__(self, api_key: Optional[str] = None, server_configs: Optional[List[ServerConfig]] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        server_configs: Optional[List[ServerConfig]] = None,
+    ):
         """Initialize the chatbot
 
         Args:
@@ -106,9 +111,7 @@ class DevChatbot:
         if not session:
             raise RuntimeError("get_document tool not available on any server")
 
-        result = await session.call_tool(
-            "get_document", {"document_uri": document_uri}
-        )
+        result = await session.call_tool("get_document", {"document_uri": document_uri})
         return json.loads(result.content[0].text) if result.content else None
 
     async def upload_document(
@@ -195,7 +198,11 @@ class DevChatbot:
             response = f"🔌 Connected to {len(self.sessions)} MCP server(s):\n"
             for server_name, session in self.sessions.items():
                 # Count tools for this server
-                tool_count = sum(1 for tool_name, srv in self.tool_to_server.items() if srv == server_name)
+                tool_count = sum(
+                    1
+                    for tool_name, srv in self.tool_to_server.items()
+                    if srv == server_name
+                )
                 response += f"\n  • {server_name}"
                 response += f"\n    Tools: {tool_count}"
 
@@ -368,7 +375,9 @@ class DevChatbot:
         except Exception as e:
             return f"❌ Error calling Claude: {e}"
 
-    async def _connect_to_server(self, config: ServerConfig, exit_stack: AsyncExitStack) -> None:
+    async def _connect_to_server(
+        self, config: ServerConfig, exit_stack: AsyncExitStack
+    ) -> None:
         """Connect to an MCP server and register its tools
 
         Args:
@@ -387,7 +396,7 @@ class DevChatbot:
         server_params = StdioServerParameters(
             command="sh",
             args=["-c", f"{config.command} {' '.join(config.args)} 2>/dev/null"],
-            env=server_env
+            env=server_env,
         )
 
         print(f"🔌 Connecting to {config.name}...")
@@ -405,6 +414,7 @@ class DevChatbot:
         except Exception as e:
             print(f"❌ Error connecting to {config.name}: {e}")
             import traceback
+
             traceback.print_exc(file=sys.stderr)
             raise
 
@@ -424,19 +434,23 @@ class DevChatbot:
         # Use default config if none provided
         if not self.server_configs:
             # Default to the asta-resources MCP server
-            env = os.environ.copy()
             self.server_configs = [
                 ServerConfig(
                     name="asta-resources",
                     command="uv",
                     args=["run", "asta-resources-mcp"],
-                    env={"PYTHONUNBUFFERED": "1", "FASTMCP_LOG_LEVEL": "WARNING"}
+                    env={"PYTHONUNBUFFERED": "1", "FASTMCP_LOG_LEVEL": "WARNING"},
                 ),
                 ServerConfig(
                     name="asta-paper-finder",
                     command="uv",
-                    args=["run", "--directory", "/Users/rodneyk/workspace/nora/mcp", "paper_finder_server.py"],
-                )
+                    args=[
+                        "run",
+                        "--directory",
+                        "/Users/rodneyk/workspace/nora/mcp",
+                        "paper_finder_server.py",
+                    ],
+                ),
             ]
 
         # Connect to all servers using AsyncExitStack
@@ -454,7 +468,9 @@ class DevChatbot:
                 print("❌ No MCP servers connected. Exiting.")
                 return
 
-            print(f"\n🎉 Ready! Connected to {len(self.sessions)} server(s) with {len(self.available_tools)} tool(s) total.\n")
+            print(
+                f"\n🎉 Ready! Connected to {len(self.sessions)} server(s) with {len(self.available_tools)} tool(s) total.\n"
+            )
 
             # Main loop
             while True:
@@ -483,6 +499,7 @@ class DevChatbot:
                 except Exception as e:
                     print(f"\n❌ Error: {e}")
                     import traceback
+
                     traceback.print_exc()
 
 

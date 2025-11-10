@@ -16,14 +16,33 @@ os.environ["FASTMCP_NO_BANNER"] = "1"
 
 from .config import load_config
 from .mcp_tools import create_mcp_server
+from .auth import get_user_context_from_env, UnauthorizedError
 
 # Configuration constants
 ALLOWED_MIME_TYPES = {"application/json", "application/pdf", "text/plain"}
 
 logger = logging.getLogger(__name__)
 
+
 def main():
     logger.info("Starting MCP-only server in stdio mode")
+
+    # Get user context from environment variable
+    try:
+        user_context = get_user_context_from_env()
+        logger.info(f"Authenticated user: {user_context.user_uri}")
+    except UnauthorizedError as e:
+        logger.error(f"Authentication failed: {e}")
+        print(f"ERROR: {e}", flush=True)
+        print(
+            "Please set the ASTA_USER environment variable to your user URI.",
+            flush=True,
+        )
+        print(
+            "Example: export ASTA_USER='asta://local-postgres/user/12345678-1234-1234-1234-123456789abc'",
+            flush=True,
+        )
+        raise SystemExit(1)
 
     # Load configuration
     config = load_config()
@@ -32,12 +51,13 @@ def main():
 
     logger.info(f"Using document store: {type(document_store).__name__}")
 
-    # Create MCP server
+    # Create MCP server with user authentication
     # Note: We pass the document store directly - FastMCP will handle initialization
     mcp_server = create_mcp_server(
         document_store=document_store,
         max_file_size_bytes=max_file_size_bytes,
         allowed_mime_types=ALLOWED_MIME_TYPES,
+        user_uri=user_context.user_uri,
     )
 
     logger.info("MCP server created, starting stdio transport...")

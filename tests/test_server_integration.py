@@ -10,6 +10,9 @@ from asta.resources.config import load_config
 from asta.resources.model import DocumentMetadata, Document
 from asta.resources.exceptions import InvalidMimeTypeError
 
+# Test user URI for authentication
+TEST_USER_URI = "asta://local-postgres/user/00000000-0000-0000-0000-000000000001"
+
 
 @pytest_asyncio.fixture
 async def document_store():
@@ -52,7 +55,7 @@ async def test_upload_and_search_document(document_store, temp_data_dir):
         content=test_content,  # Plain string for text/plain
     ).to_binary()
 
-    doc_uri = await document_store.store(document)
+    doc_uri = await document_store.store(document, TEST_USER_URI)
     doc_metadata.uri = doc_uri
 
     assert isinstance(doc_metadata, DocumentMetadata)
@@ -62,13 +65,17 @@ async def test_upload_and_search_document(document_store, temp_data_dir):
     assert doc_metadata.uri != ""
 
     # Search for the document
-    search_results = await document_store.search(query="Python", limit=5)
+    search_results = await document_store.search(
+        query="Python", owner_uri=TEST_USER_URI, limit=5
+    )
 
     assert len(search_results) > 0
     assert any(hit.result.uri == doc_metadata.uri for hit in search_results)
 
     # Test another search term
-    search_results = await document_store.search(query="FastMCP", limit=5)
+    search_results = await document_store.search(
+        query="FastMCP", owner_uri=TEST_USER_URI, limit=5
+    )
     assert len(search_results) > 0
     assert any(hit.result.uri == doc_metadata.uri for hit in search_results)
 
@@ -92,11 +99,11 @@ async def test_get_document(document_store, temp_data_dir):
         content=test_content,  # Plain string for text/plain
     ).to_binary()
 
-    doc_uri = await document_store.store(document)
+    doc_uri = await document_store.store(document, TEST_USER_URI)
     doc_metadata.uri = doc_uri
 
     # Get the document by ID
-    retrieved_doc = await document_store.get(doc_metadata.uri)
+    retrieved_doc = await document_store.get(doc_metadata.uri, TEST_USER_URI)
 
     assert retrieved_doc is not None
     assert retrieved_doc.metadata.uri == doc_metadata.uri
@@ -121,7 +128,7 @@ async def test_list_documents(document_store, temp_data_dir):
         content="First document content",  # Plain string for text/plain
     ).to_binary()
 
-    doc1_id = await document_store.store(document1)
+    doc1_id = await document_store.store(document1, TEST_USER_URI)
     doc1_metadata.uri = doc1_id
 
     doc2_metadata = DocumentMetadata(
@@ -136,11 +143,11 @@ async def test_list_documents(document_store, temp_data_dir):
         content="Second document content",  # Plain string for text/plain
     ).to_binary()
 
-    doc2_id = await document_store.store(document2)
+    doc2_id = await document_store.store(document2, TEST_USER_URI)
     doc2_metadata.uri = doc2_id
 
     # List all documents
-    documents = await document_store.list_docs()
+    documents = await document_store.list_docs(TEST_USER_URI)
 
     assert len(documents) >= 2
     doc_uris = [doc.uri for doc in documents]
@@ -188,7 +195,7 @@ async def test_upload_pdf_document(document_store, temp_data_dir):
         content=encoded_content,
     ).to_binary()
 
-    doc_uri = await document_store.store(document)
+    doc_uri = await document_store.store(document, TEST_USER_URI)
     doc_metadata.uri = doc_uri
 
     assert doc_metadata.name == "test.pdf"
@@ -196,7 +203,7 @@ async def test_upload_pdf_document(document_store, temp_data_dir):
     assert doc_metadata.extra["title"] == "Test PDF"
 
     # Retrieve and verify the document
-    retrieved_doc = await document_store.get(doc_metadata.uri)
+    retrieved_doc = await document_store.get(doc_metadata.uri, TEST_USER_URI)
     assert retrieved_doc is not None
     assert retrieved_doc.metadata.mime_type == "application/pdf"
 
@@ -218,11 +225,13 @@ async def test_search_no_results(document_store, temp_data_dir):
         content="This document is about cats",  # Plain string for text/plain
     ).to_binary()
 
-    doc_uri = await document_store.store(document)
+    doc_uri = await document_store.store(document, TEST_USER_URI)
     doc_metadata.uri = doc_uri
 
     # Search for something that doesn't exist
-    results = await document_store.search(query="dogs", limit=5)
+    results = await document_store.search(
+        query="dogs", owner_uri=TEST_USER_URI, limit=5
+    )
 
     assert len(results) == 0
 
@@ -235,7 +244,9 @@ async def test_get_nonexistent_document(document_store, temp_data_dir):
 
     # Use a valid document URI format that doesn't exist
     fake_uuid = str(uuid.uuid4())
-    fake_doc_uri = f"asta://{document_store.namespace}/{document_store.resource_type}/{fake_uuid}"
+    fake_doc_uri = (
+        f"asta://{document_store.namespace}/{document_store.resource_type}/{fake_uuid}"
+    )
 
-    result = await document_store.get(fake_doc_uri)
+    result = await document_store.get(fake_doc_uri, TEST_USER_URI)
     assert result is None
