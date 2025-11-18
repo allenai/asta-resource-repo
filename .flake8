@@ -1,0 +1,7 @@
+[flake8]
+# F category for logical errors
+# Serious "E" errors
+select = F,E721,E901,E902,E999
+
+# Ignore line too long errors
+ignore = E501

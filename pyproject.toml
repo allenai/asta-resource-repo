@@ -39,22 +39,6 @@ chatbot = [
     "mcp~=1.2",
 ]
 
-[tool.flake8]
-select = [
-    # F category for logical errors
-    "F",
-
-    # Serious "E" errors
-    "E721", # `type(x) == <t>` instead of `isinstance(x, <t>)`
-    "E901", "E902", "E999" # syntax errors
-]
-
-ignore = [
-#    "F401",  # module imported but unused
-#    "F541",  # f-string is missing placeholders
-]
-
-
 [project.scripts]
 asta-resources-server = "asta.resources.server:main"
 asta-resources-mcp = "asta.resources.mcp_server:main"

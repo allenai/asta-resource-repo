@@ -4,7 +4,7 @@ import base64
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 
 from .document_store import PostgresDocumentStore
@@ -16,6 +16,7 @@ from .exceptions import (
     ValidationError,
     DocumentServiceError,
 )
+from .auth import get_user_context_from_header, UserContext
 
 
 # Request/Response models for REST API
@@ -109,7 +110,10 @@ def create_rest_router(
         summary="Upload a document",
         description="Upload a new document with metadata",
     )
-    async def upload_document(request: UploadDocumentRequest) -> UploadDocumentResponse:
+    async def upload_document(
+        request: UploadDocumentRequest,
+        user_context: UserContext = Depends(get_user_context_from_header),
+    ) -> UploadDocumentResponse:
         """Upload a new document"""
         try:
             # Validate inputs
@@ -169,7 +173,7 @@ def create_rest_router(
                 content=request.content,
             ).to_binary()
 
-            doc_uri = await document_store.store(document)
+            doc_uri = await document_store.store(document, user_context.user_uri)
             doc_metadata.uri = doc_uri
 
             return UploadDocumentResponse(
@@ -202,13 +206,16 @@ def create_rest_router(
         description="Retrieve a document by its namespace, resource type, and UUID",
     )
     async def get_document(
-        namespace: str, resource_type: str, doc_uuid: str
+        namespace: str,
+        resource_type: str,
+        doc_uuid: str,
+        user_context: UserContext = Depends(get_user_context_from_header),
     ) -> GetDocumentResponse:
         """Get a document by namespace, resource_type, and uuid"""
         try:
             # Construct URI from path parameters
             uri = _id_to_uri(namespace, resource_type, doc_uuid)
-            document = await document_store.get(uri)
+            document = await document_store.get(uri, user_context.user_uri)
 
             if document is None:
                 raise DocumentNotFoundError(
@@ -243,10 +250,12 @@ def create_rest_router(
         summary="List all documents",
         description="Get a list of all documents with metadata",
     )
-    async def list_documents() -> ListDocumentsResponse:
+    async def list_documents(
+        user_context: UserContext = Depends(get_user_context_from_header),
+    ) -> ListDocumentsResponse:
         """List all documents"""
         try:
-            documents = await document_store.list_docs()
+            documents = await document_store.list_docs(user_context.user_uri)
             return ListDocumentsResponse(
                 documents=documents,
                 total=len(documents),
@@ -264,10 +273,13 @@ def create_rest_router(
     )
     async def search_documents(
         request: SearchDocumentsRequest,
+        user_context: UserContext = Depends(get_user_context_from_header),
     ) -> SearchDocumentsResponse:
         """Search documents"""
         try:
-            hits = await document_store.search(request.query, request.limit)
+            hits = await document_store.search(
+                request.query, user_context.user_uri, request.limit
+            )
             return SearchDocumentsResponse(
                 results=hits,
                 total=len(hits),
@@ -283,20 +295,25 @@ def create_rest_router(
         summary="Delete a document",
         description="Delete a document by its namespace, resource type, and UUID",
     )
-    async def delete_document(namespace: str, resource_type: str, doc_uuid: str) -> None:
+    async def delete_document(
+        namespace: str,
+        resource_type: str,
+        doc_uuid: str,
+        user_context: UserContext = Depends(get_user_context_from_header),
+    ) -> None:
         """Delete a document"""
         try:
             # Construct URI from path parameters
             uri = _id_to_uri(namespace, resource_type, doc_uuid)
 
-            # Check if document exists
-            document = await document_store.get(uri)
+            # Check if document exists and is owned by user
+            document = await document_store.get(uri, user_context.user_uri)
             if document is None:
                 raise DocumentNotFoundError(
                     f"Document with ID '{namespace}/{resource_type}/{doc_uuid}' not found"
                 )
 
-            await document_store.delete(uri)
+            await document_store.delete(uri, user_context.user_uri)
 
         except ValidationError as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

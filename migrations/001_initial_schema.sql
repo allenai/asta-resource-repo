@@ -18,13 +18,13 @@ CREATE TABLE IF NOT EXISTS documents (
     name TEXT,
     mime_type TEXT NOT NULL,
     tags JSONB,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    modified_at TIMESTAMP NOT NULL DEFAULT NOW(),
     extra JSONB,
     size INTEGER NOT NULL DEFAULT 0,
     binary_content BYTEA,
     text_content TEXT,
-    owner_id BIGINT
+    owner_id BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    modified_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 -- Create unique index on users.uuid

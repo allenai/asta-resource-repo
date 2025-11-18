@@ -10,6 +10,9 @@ from asta.resources.config import load_config
 from asta.resources.exceptions import ValidationError
 from asta.resources.model import DocumentMetadata, Document
 
+# Test user URI for authentication
+TEST_USER_URI = "asta://local-postgres/user/00000000-0000-0000-0000-000000000001"
+
 
 @pytest_asyncio.fixture
 async def postgres_store():
@@ -43,12 +46,12 @@ async def test_postgres_upload_and_retrieve(postgres_store):
         content=test_content,
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
     assert doc_id is not None
     assert len(doc_id) > 0
 
     # Retrieve the document
-    retrieved_doc = await postgres_store.get(doc_id)
+    retrieved_doc = await postgres_store.get(doc_id, TEST_USER_URI)
 
     assert retrieved_doc is not None
     assert retrieved_doc.metadata.uri == doc_id
@@ -77,7 +80,7 @@ async def test_postgres_list_documents(postgres_store):
         content="First document in PostgreSQL",
     ).to_binary()
 
-    doc1_id = await postgres_store.store(document1)
+    doc1_id = await postgres_store.store(document1, TEST_USER_URI)
 
     doc2_metadata = DocumentMetadata(
         uri="",
@@ -92,10 +95,10 @@ async def test_postgres_list_documents(postgres_store):
         content='{"key": "value"}',
     ).to_binary()
 
-    doc2_id = await postgres_store.store(document2)
+    doc2_id = await postgres_store.store(document2, TEST_USER_URI)
 
     # List all documents
-    documents = await postgres_store.list_docs()
+    documents = await postgres_store.list_docs(TEST_USER_URI)
 
     assert len(documents) >= 2
     doc_ids = [doc.uri for doc in documents]
@@ -124,20 +127,20 @@ async def test_postgres_search_documents(postgres_store):
         content="This document contains information about Python programming and FastMCP framework.",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Search by content
-    results = await postgres_store.search("Python", limit=10)
+    results = await postgres_store.search("Python", TEST_USER_URI, limit=10)
     assert len(results) > 0
     assert any(hit.result.uri == doc_id for hit in results)
 
     # Search by tag
-    results = await postgres_store.search("programming", limit=10)
+    results = await postgres_store.search("programming", TEST_USER_URI, limit=10)
     assert len(results) > 0
     assert any(hit.result.uri == doc_id for hit in results)
 
     # Search by filename
-    results = await postgres_store.search("search_test", limit=10)
+    results = await postgres_store.search("search_test", TEST_USER_URI, limit=10)
     assert len(results) > 0
     assert any(hit.result.uri == doc_id for hit in results)
 
@@ -159,10 +162,10 @@ async def test_postgres_search_no_results(postgres_store):
         content="This document is about cats and dogs",
     ).to_binary()
 
-    await postgres_store.store(document)
+    await postgres_store.store(document, TEST_USER_URI)
 
     # Search for something that doesn't exist
-    results = await postgres_store.search("elephants", limit=10)
+    results = await postgres_store.search("elephants", TEST_USER_URI, limit=10)
     assert len(results) == 0
 
 
@@ -187,10 +190,10 @@ async def test_postgres_binary_document(postgres_store):
         content=encoded_content,
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Retrieve and verify
-    retrieved_doc = await postgres_store.get(doc_id)
+    retrieved_doc = await postgres_store.get(doc_id, TEST_USER_URI)
     assert retrieved_doc is not None
     assert retrieved_doc.metadata.mime_type == "application/pdf"
     assert retrieved_doc.metadata.extra["title"] == "Test PDF Document"
@@ -205,9 +208,11 @@ async def test_postgres_get_nonexistent_document(postgres_store):
     import uuid
 
     fake_uuid = str(uuid.uuid4())
-    fake_doc_id = f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
+    fake_doc_id = (
+        f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
+    )
 
-    result = await postgres_store.get(fake_doc_id)
+    result = await postgres_store.get(fake_doc_id, TEST_USER_URI)
     assert result is None
 
 
@@ -228,17 +233,19 @@ async def test_postgres_exists_check(postgres_store):
         content="Test content for exists check",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Check existence
-    assert await postgres_store.exists(doc_id) is True
+    assert await postgres_store.exists(doc_id, TEST_USER_URI) is True
 
     # Generate a properly formatted but non-existent document ID
     import uuid
 
     fake_uuid = str(uuid.uuid4())
-    fake_doc_id = f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
-    assert await postgres_store.exists(fake_doc_id) is False
+    fake_doc_id = (
+        f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/{fake_uuid}"
+    )
+    assert await postgres_store.exists(fake_doc_id, TEST_USER_URI) is False
 
 
 @pytest.mark.asyncio
@@ -258,21 +265,21 @@ async def test_postgres_delete_document(postgres_store):
         content="This document will be deleted",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Verify it exists
-    assert await postgres_store.exists(doc_id) is True
+    assert await postgres_store.exists(doc_id, TEST_USER_URI) is True
 
     # Delete it
-    success = await postgres_store.delete(doc_id)
+    success = await postgres_store.delete(doc_id, TEST_USER_URI)
     assert success is True
 
     # Verify it's gone
-    assert await postgres_store.exists(doc_id) is False
-    assert await postgres_store.get(doc_id) is None
+    assert await postgres_store.exists(doc_id, TEST_USER_URI) is False
+    assert await postgres_store.get(doc_id, TEST_USER_URI) is None
 
     # Try deleting again (should return False)
-    success = await postgres_store.delete(doc_id)
+    success = await postgres_store.delete(doc_id, TEST_USER_URI)
     assert success is False
 
 
@@ -295,10 +302,10 @@ async def test_postgres_large_document(postgres_store):
         content=large_content,
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Retrieve and verify
-    retrieved_doc = await postgres_store.get(doc_id)
+    retrieved_doc = await postgres_store.get(doc_id, TEST_USER_URI)
     assert retrieved_doc is not None
     assert len(retrieved_doc.content) == 1024 * 1024
     assert retrieved_doc.metadata.size == 1024 * 1024
@@ -323,13 +330,13 @@ async def test_postgres_search_limit(postgres_store):
             content=f"Document {i} about testing search functionality",
         ).to_binary()
 
-        await postgres_store.store(document)
+        await postgres_store.store(document, TEST_USER_URI)
 
     # Search with limit
-    results = await postgres_store.search("testing", limit=3)
+    results = await postgres_store.search("testing", TEST_USER_URI, limit=3)
     assert len(results) <= 3
 
-    results = await postgres_store.search("testing", limit=10)
+    results = await postgres_store.search("testing", TEST_USER_URI, limit=10)
     assert len(results) >= 5  # Should find all 5 documents
 
 
@@ -351,10 +358,10 @@ async def test_postgres_search_snippet(postgres_store):
         "And there's more text after the keyword for context.",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Search for keyword
-    results = await postgres_store.search("keyword", limit=10)
+    results = await postgres_store.search("keyword", TEST_USER_URI, limit=10)
 
     assert len(results) > 0
     hit = next((h for h in results if h.result.uri == doc_id), None)
@@ -382,7 +389,7 @@ async def test_postgres_connection_pool(postgres_store):
             content=f"Document {index} for parallel testing",
         ).to_binary()
 
-        return await postgres_store.store(document)
+        return await postgres_store.store(document, TEST_USER_URI)
 
     # Upload 10 documents in parallel
     doc_ids = await asyncio.gather(*[upload_doc(i) for i in range(10)])
@@ -391,7 +398,7 @@ async def test_postgres_connection_pool(postgres_store):
     assert all(doc_id is not None for doc_id in doc_ids)
 
     # Verify all documents were stored
-    documents = await postgres_store.list_docs()
+    documents = await postgres_store.list_docs(TEST_USER_URI)
     assert len(documents) >= 10
 
 
@@ -412,19 +419,19 @@ async def test_document_id_validation(postgres_store):
         content="Test document for ID validation",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Valid URI should work
-    retrieved = await postgres_store.get(doc_id)
+    retrieved = await postgres_store.get(doc_id, TEST_USER_URI)
     assert retrieved is not None
     assert retrieved.metadata.uri == doc_id
 
     # Test invalid formats
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get("just-a-uuid")
+        await postgres_store.get("just-a-uuid", TEST_USER_URI)
 
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get("too/many/parts/here/now")
+        await postgres_store.get("too/many/parts/here/now", TEST_USER_URI)
 
     # Test mismatched namespace
     # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
@@ -434,29 +441,39 @@ async def test_document_id_validation(postgres_store):
     wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
     with pytest.raises(ValidationError):
-        await postgres_store.get(wrong_namespace_id)
+        await postgres_store.get(wrong_namespace_id, TEST_USER_URI)
 
     # Test mismatched resource_type
     wrong_resource_type_id = f"asta://{postgres_store.namespace}/wrong_type/{uuid_part}"
 
     with pytest.raises(ValidationError):
-        await postgres_store.get(wrong_resource_type_id)
+        await postgres_store.get(wrong_resource_type_id, TEST_USER_URI)
 
     # Test invalid UUID format (regex won't match invalid characters)
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/not-a-valid-uuid")
+        await postgres_store.get(
+            f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/not-a-valid-uuid",
+            TEST_USER_URI,
+        )
 
     # Test empty UUID part - regex won't match
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/")
+        await postgres_store.get(
+            f"asta://{postgres_store.namespace}/{postgres_store.resource_type}/",
+            TEST_USER_URI,
+        )
 
     # Test empty namespace part
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta:///{postgres_store.resource_type}/{uuid_part}")
+        await postgres_store.get(
+            f"asta:///{postgres_store.resource_type}/{uuid_part}", TEST_USER_URI
+        )
 
     # Test empty resource_type part
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.get(f"asta://{postgres_store.namespace}//{uuid_part}")
+        await postgres_store.get(
+            f"asta://{postgres_store.namespace}//{uuid_part}", TEST_USER_URI
+        )
 
 
 @pytest.mark.asyncio
@@ -476,11 +493,11 @@ async def test_document_id_validation_on_delete(postgres_store):
         content="Test document for delete validation",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Test invalid ID format on delete
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.delete("just-a-uuid")
+        await postgres_store.delete("just-a-uuid", TEST_USER_URI)
 
     # Test mismatched namespace on delete
     # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
@@ -490,10 +507,10 @@ async def test_document_id_validation_on_delete(postgres_store):
     wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
     with pytest.raises(ValidationError):
-        await postgres_store.delete(wrong_namespace_id)
+        await postgres_store.delete(wrong_namespace_id, TEST_USER_URI)
 
     # Valid delete should work
-    success = await postgres_store.delete(doc_id)
+    success = await postgres_store.delete(doc_id, TEST_USER_URI)
     assert success is True
 
 
@@ -514,11 +531,11 @@ async def test_document_id_validation_on_exists(postgres_store):
         content="Test document for exists validation",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Test invalid ID format on exists
     with pytest.raises(ValidationError, match="must be in format"):
-        await postgres_store.exists("just-a-uuid")
+        await postgres_store.exists("just-a-uuid", TEST_USER_URI)
 
     # Test mismatched namespace on exists
     # doc_id is now "asta://{namespace}/{resource_type}/{uuid}"
@@ -528,10 +545,10 @@ async def test_document_id_validation_on_exists(postgres_store):
     wrong_namespace_id = f"asta://wrong_namespace/{resource_type_part}/{uuid_part}"
 
     with pytest.raises(ValidationError):
-        await postgres_store.exists(wrong_namespace_id)
+        await postgres_store.exists(wrong_namespace_id, TEST_USER_URI)
 
     # Valid exists check should work
-    exists = await postgres_store.exists(doc_id)
+    exists = await postgres_store.exists(doc_id, TEST_USER_URI)
     assert exists is True
 
 
@@ -551,7 +568,7 @@ async def test_document_id_format_after_store(postgres_store):
         content="Test document for ID format check",
     ).to_binary()
 
-    doc_id = await postgres_store.store(document)
+    doc_id = await postgres_store.store(document, TEST_USER_URI)
 
     # Verify format starts with asta://
     assert doc_id.startswith("asta://")
@@ -572,5 +589,5 @@ async def test_document_id_format_after_store(postgres_store):
         pytest.fail(f"UUID part '{parts[2]}' is not a valid UUID")
 
     # Verify retrieved document has same URI
-    retrieved = await postgres_store.get(doc_id)
+    retrieved = await postgres_store.get(doc_id, TEST_USER_URI)
     assert retrieved.metadata.uri == doc_id
