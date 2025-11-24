@@ -5,6 +5,7 @@ from typing import Any, Optional, Union
 
 from a2a.types import DataPart, FilePart, FileWithUri, Message, Part, TextPart
 
+DataArtifact = TextPart | FilePart | DataPart
 
 # Data Models - None needed, using A2A types
 
@@ -16,7 +17,7 @@ class IArtifactStore(ABC):
     """Interface for artifact storage."""
 
     @abstractmethod
-    async def store(self, artifact: DataPart) -> FileWithUri:
+    async def store(self, artifact: DataArtifact) -> FileWithUri:
         """
         Store an artifact and return a file reference.
 
@@ -29,7 +30,7 @@ class IArtifactStore(ABC):
         pass
 
     @abstractmethod
-    async def get(self, file_ref: FileWithUri) -> Optional[DataPart]:
+    async def get(self, file_ref: FileWithUri) -> Optional[DataArtifact]:
         """
         Retrieve an artifact by file reference.
 
@@ -79,7 +80,7 @@ class IConversationHistory(ABC):
         pass
 
     @abstractmethod
-    async def get_messages(self, limit: Optional[int] = None) -> list[Union[TextPart, FilePart, DataPart]]:
+    async def get_messages(self, limit: Optional[int] = None) -> list[Message]:
         """
         Retrieve all message parts from conversation history, flattened into a single list.
 
@@ -130,9 +131,9 @@ class InMemoryArtifactStore(IArtifactStore):
     """Simple in-memory implementation of artifact storage for testing."""
 
     def __init__(self):
-        self._artifacts: dict[str, DataPart] = {}
+        self._artifacts: dict[str, DataArtifact] = {}
 
-    async def store(self, artifact: DataPart) -> FileWithUri:
+    async def store(self, artifact: DataArtifact) -> FileWithUri:
         """Store an artifact and return a file reference."""
         import uuid
 

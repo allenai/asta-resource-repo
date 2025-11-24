@@ -3,12 +3,10 @@
 import uuid
 from typing import Optional
 
-import httpx
-from a2a.client import A2AClient
-from a2a.client.helpers import create_text_message_object
+from a2a.client import ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import Event, EventQueue
-from a2a.types import DataPart, Message, Role, Task, TextPart
+from a2a.types import DataPart, Message, Role, TextPart
 
 from a2a_poc.storage import (
     IArtifactStore,
@@ -49,11 +47,7 @@ class HandlerExecutor(AgentExecutor):
         self.conversation_history = conversation_history or InMemoryConversationHistory()
 
         # Create A2A client for communicating with subagent
-        self.httpx_client = httpx.AsyncClient(timeout=30.0)
-        self.a2a_client = A2AClient(
-            httpx_client=self.httpx_client,
-            url=subagent_url,
-        )
+        self.a2a_client = ClientFactory.connect(agent=subagent_url)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -78,19 +72,24 @@ class HandlerExecutor(AgentExecutor):
         )
         await self.conversation_history.add_message(user_msg)
 
-        # Build context from conversation history (get all parts)
-        history_parts = await self.conversation_history.get_messages()
-        history_context_text = ""
-        for part in history_parts:
-            if isinstance(part, TextPart):
-                history_context_text += part.text + "\n"
-
         # Send request to Subagent using A2A client
         try:
-            # Create message for subagent
+            # Get full conversation history
             all_messages = await self.conversation_history.get_all_messages()
-            message_text = f"Context: {len(all_messages)} previous messages\n\n" f"Current request: {user_message_text}"
-            message = create_text_message_object(role=Role.user, content=message_text)
+
+            # Serialize conversation history for metadata
+            history_data = [msg.model_dump() for msg in all_messages]
+
+            # Create message for subagent with history in metadata
+            message = Message(
+                message_id=str(uuid.uuid4()),
+                role=Role.user,
+                parts=[TextPart(text=user_message_text)],
+                metadata={
+                    "conversation_history": history_data,
+                    "history_length": len(all_messages),
+                },
+            )
 
             # Send message and collect responses
             response_text = "Subagent response received"
@@ -199,6 +198,8 @@ class HandlerExecutor(AgentExecutor):
 
     async def close(self) -> None:
         """
-        Close the HTTP client and clean up resources.
+        Clean up resources.
+
+        Note: The Client created by ClientFactory manages its own resources.
         """
-        await self.httpx_client.aclose()
+        pass
