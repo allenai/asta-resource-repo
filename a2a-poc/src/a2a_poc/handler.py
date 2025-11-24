@@ -5,7 +5,7 @@ from typing import Optional
 
 from a2a.client import ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.events import Event, EventQueue
+from a2a.server.events import EventQueue
 from a2a.types import DataPart, Message, Role, TextPart
 
 from a2a_poc.storage import (
@@ -45,9 +45,6 @@ class HandlerExecutor(AgentExecutor):
         self.subagent_url = subagent_url
         self.artifact_store = artifact_store or InMemoryArtifactStore()
         self.conversation_history = conversation_history or InMemoryConversationHistory()
-
-        # Create A2A client for communicating with subagent
-        self.a2a_client = ClientFactory.connect(agent=subagent_url)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -95,7 +92,9 @@ class HandlerExecutor(AgentExecutor):
             response_text = "Subagent response received"
             artifacts_to_persist = []
 
-            async for event in self.a2a_client.send_message(message):
+            # Create A2A client for communicating with subagent
+            a2a_client = await ClientFactory.connect(agent=self.subagent_url)
+            async for event in a2a_client.send_message(message):
                 # Handle Message responses
                 if isinstance(event, Message):
                     for part in event.parts:
@@ -130,13 +129,7 @@ class HandlerExecutor(AgentExecutor):
                 parts=[TextPart(text=response_text)],
             )
 
-            event_queue.enqueue_event(
-                Event(
-                    message=response_message,
-                    taskId=context.task_id,
-                    eventId=str(uuid.uuid4()),
-                )
-            )
+            await event_queue.enqueue_event(response_message)
 
             if artifacts_to_persist:
                 artifact_info_message = Message(
@@ -144,13 +137,7 @@ class HandlerExecutor(AgentExecutor):
                     role=Role.agent,
                     parts=[TextPart(text=f"\nArtifacts stored: {', '.join(artifacts_to_persist)}")],
                 )
-                event_queue.enqueue_event(
-                    Event(
-                        message=artifact_info_message,
-                        taskId=context.task_id,
-                        eventId=str(uuid.uuid4()),
-                    )
-                )
+                await event_queue.enqueue_event(artifact_info_message)
 
         except Exception as e:
             error_msg = f"Error communicating with Subagent: {str(e)}"
@@ -159,13 +146,7 @@ class HandlerExecutor(AgentExecutor):
                 role=Role.agent,
                 parts=[TextPart(text=error_msg)],
             )
-            event_queue.enqueue_event(
-                Event(
-                    message=error_message,
-                    taskId=context.task_id,
-                    eventId=str(uuid.uuid4()),
-                )
-            )
+            await event_queue.enqueue_event(error_message)
 
             # Store error in conversation history
             error_history_msg = Message(
@@ -188,13 +169,7 @@ class HandlerExecutor(AgentExecutor):
             role=Role.agent,
             parts=[TextPart(text=f"Task {context.task_id} cancellation requested")],
         )
-        event_queue.enqueue_event(
-            Event(
-                message=cancel_message,
-                taskId=context.task_id,
-                eventId=str(uuid.uuid4()),
-            )
-        )
+        await event_queue.enqueue_event(cancel_message)
 
     async def close(self) -> None:
         """

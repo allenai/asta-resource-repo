@@ -3,9 +3,9 @@
 import json
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
-from a2a.types import DataPart, FilePart, FileWithUri, Message, Part, TextPart
+from a2a.types import DataPart, FilePart, FileWithUri, Message, TextPart
 
 DataArtifact = TextPart | FilePart | DataPart
 

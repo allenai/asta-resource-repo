@@ -52,21 +52,18 @@ class SubagentExecutor(AgentExecutor):
 
             # Create response message
             response_message = Message(
-                messageId=str(uuid.uuid4()),
+                message_id=str(uuid.uuid4()),
                 role=Role.AGENT,
                 parts=[TextPart(text=result_text)],
             )
 
             # Send message to event queue
-            from a2a.server.events import Event
 
-            event_queue.enqueue_event(
-                Event(message=response_message, taskId=task_id, eventId=str(uuid.uuid4()))
-            )
+            await event_queue.enqueue_event(response_message)
 
             # Create a sample artifact to demonstrate artifact handling
             artifact = Artifact(
-                artifactId=str(uuid.uuid4()),
+                artifact_id=str(uuid.uuid4()),
                 name="processing_result.txt",
                 parts=[TextPart(text=f"Task ID: {task_id}\nProcessed message: {user_message}")],
             )
@@ -78,11 +75,7 @@ class SubagentExecutor(AgentExecutor):
                 parts=[artifact],
             )
 
-            event_queue.enqueue_event(
-                Event(
-                    message=artifact_message, taskId=task_id, eventId=str(uuid.uuid4())
-                )
-            )
+            await event_queue.enqueue_event(artifact_message)
 
         finally:
             # Clean up task tracking
@@ -105,13 +98,9 @@ class SubagentExecutor(AgentExecutor):
             message_text = f"Task {task_id} not found"
 
         cancel_message = Message(
-            messageId=str(uuid.uuid4()),
+            message_id=str(uuid.uuid4()),
             role=Role.AGENT,
             parts=[TextPart(text=message_text)],
         )
 
-        from a2a.server.events import Event
-
-        event_queue.enqueue_event(
-            Event(message=cancel_message, taskId=task_id, eventId=str(uuid.uuid4()))
-        )
+        await event_queue.enqueue_event(cancel_message)
