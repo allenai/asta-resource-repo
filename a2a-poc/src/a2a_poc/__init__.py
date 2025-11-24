@@ -3,6 +3,8 @@
 __version__ = "0.1.0"
 
 from a2a_poc.storage import (
+    FilesystemArtifactStore,
+    FilesystemConversationHistory,
     IArtifactStore,
     IConversationHistory,
     InMemoryArtifactStore,
@@ -10,6 +12,8 @@ from a2a_poc.storage import (
 )
 
 __all__ = [
+    "FilesystemArtifactStore",
+    "FilesystemConversationHistory",
     "IArtifactStore",
     "IConversationHistory",
     "InMemoryArtifactStore",
