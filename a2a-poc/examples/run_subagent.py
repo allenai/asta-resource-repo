@@ -37,11 +37,11 @@ def create_subagent_server(host: str = "0.0.0.0", port: int = 9001) -> A2AStarle
         description="Stateless task processing agent that returns results with artifacts",
         url=f"http://{host}:{port}/",
         version="1.0.0",
-        defaultInputModes=["text"],
-        defaultOutputModes=["text"],
+        default_input_modes=["text"],
+        default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=False),
         skills=skills,
-        supportsAuthenticatedExtendedCard=False,
+        supports_authenticated_extended_card=False,
     )
 
     # Initialize request handler with subagent executor

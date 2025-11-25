@@ -1,12 +1,12 @@
 """Subagent implementation using A2A SDK."""
 
 import uuid
-from typing import Any
 from datetime import datetime
+from typing import Any
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import Artifact, Message, Role, TextPart
+from a2a.types import Message, Role, TextPart
 
 
 class SubagentExecutor(AgentExecutor):
