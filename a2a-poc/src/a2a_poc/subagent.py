@@ -2,6 +2,7 @@
 
 import uuid
 from typing import Any
+from datetime import datetime
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -35,7 +36,7 @@ class SubagentExecutor(AgentExecutor):
 
         # Track this task
         self.active_tasks[task_id] = {
-            "started_at": str(context.call_context.timestamp),
+            "started_at": str(datetime.now()),
             "has_message": context.message is not None,
         }
 
@@ -53,7 +54,7 @@ class SubagentExecutor(AgentExecutor):
             # Create response message
             response_message = Message(
                 message_id=str(uuid.uuid4()),
-                role=Role.AGENT,
+                role=Role.agent,
                 parts=[TextPart(text=result_text)],
             )
 
@@ -61,18 +62,11 @@ class SubagentExecutor(AgentExecutor):
 
             await event_queue.enqueue_event(response_message)
 
-            # Create a sample artifact to demonstrate artifact handling
-            artifact = Artifact(
-                artifact_id=str(uuid.uuid4()),
-                name="processing_result.txt",
-                parts=[TextPart(text=f"Task ID: {task_id}\nProcessed message: {user_message}")],
-            )
-
             # Send artifact in another event
             artifact_message = Message(
-                messageId=str(uuid.uuid4()),
-                role=Role.AGENT,
-                parts=[artifact],
+                message_id=str(uuid.uuid4()),
+                role=Role.agent,
+                parts=[TextPart(text=f"Task ID: {task_id}\nProcessed message: {user_message}")],
             )
 
             await event_queue.enqueue_event(artifact_message)
@@ -99,7 +93,7 @@ class SubagentExecutor(AgentExecutor):
 
         cancel_message = Message(
             message_id=str(uuid.uuid4()),
-            role=Role.AGENT,
+            role=Role.agent,
             parts=[TextPart(text=message_text)],
         )
 
