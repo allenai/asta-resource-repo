@@ -1,27 +1,22 @@
 """Subagent implementation using A2A SDK."""
 
 import uuid
-from datetime import datetime
-from typing import Any
+import logging
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.tasks.task_store import TaskStore
 from a2a.server.events import EventQueue
-from a2a.types import Message, Role, TextPart
+from a2a.types import Message, Role, TextPart, Task, TaskStatus, TaskState
 
 
-class SubagentExecutor(AgentExecutor):
+class AsyncAgent(AgentExecutor):
     """
-    Subagent executor that processes tasks without maintaining state.
-
-    The Subagent is responsible for:
-    - Processing task requests from the Handler
-    - Returning results with optional artifacts (as hydrated data)
-    - Internal task tracking (not persisting conversation history)
+    Subagent executor that starts asynchronous tasks
     """
 
-    def __init__(self):
+    def __init__(self, task_store: TaskStore) -> None:
         """Initialize the Subagent executor."""
-        self.active_tasks: dict[str, dict[str, Any]] = {}
+        self._task_store = task_store
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -33,12 +28,12 @@ class SubagentExecutor(AgentExecutor):
         """
         # Extract task information from context
         task_id = context.task_id
-
-        # Track this task
-        self.active_tasks[task_id] = {
-            "started_at": str(datetime.now()),
-            "has_message": context.message is not None,
-        }
+        task = Task(
+            id=context.task_id,
+            context_id=context.context_id,
+            status=TaskStatus(state=TaskState.working),
+        )
+        await self._task_store.save(task, context.call_context)
 
         try:
             # Get the user's message
@@ -49,7 +44,7 @@ class SubagentExecutor(AgentExecutor):
                         user_message += part.root.text
 
             # Process the message (simple echo with processing indicator)
-            result_text = f"Subagent processed: {user_message}"
+            result_text = f"Working on task '{user_message}'"
 
             # Create response message
             response_message = Message(
@@ -71,10 +66,8 @@ class SubagentExecutor(AgentExecutor):
 
             await event_queue.enqueue_event(artifact_message)
 
-        finally:
-            # Clean up task tracking
-            if task_id in self.active_tasks:
-                del self.active_tasks[task_id]
+        except Exception as e:
+            logging.error(e)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """
@@ -98,3 +91,52 @@ class SubagentExecutor(AgentExecutor):
         )
 
         await event_queue.enqueue_event(cancel_message)
+
+
+class SyncAgent(AgentExecutor):
+    """
+    Subagent executor that echos a user message
+    """
+
+    def __init__(self) -> None:
+        """Initialize"""
+        pass
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """
+        Execute a task request.
+
+        Args:
+            context: Request context containing task information
+            event_queue: Queue for sending response events
+        """
+
+        if not context.message:
+            return None
+
+        try:
+            # Get the user's message
+            user_message = "\n".join(
+                part.root.text for part in context.message.parts if part.root.kind == "text")
+
+            # Process the message (simple echo with processing indicator)
+            reversed = "".join(c for c in reversed(user_message))
+            result_text = f"You say '{user_message}'. I say '{reversed}'"
+
+            # Create response message
+            response_message = Message(
+                message_id=str(uuid.uuid4()),
+                role=Role.agent,
+                parts=[TextPart(text=result_text)],
+            )
+
+            await event_queue.enqueue_event(response_message)
+        except Exception as e:
+            logging.error("Error processing request", e)
+            return None
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """
+        No tasks to cancel for SyncAgent.
+        """
+        return None

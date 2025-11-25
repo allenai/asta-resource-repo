@@ -7,7 +7,7 @@ from typing import Optional, Union
 
 from a2a.types import DataPart, FilePart, FileWithUri, Message, TextPart
 
-DataArtifact = TextPart | FilePart | DataPart
+MessageAttachment = FilePart | DataPart
 
 # Data Models - None needed, using A2A types
 
@@ -19,7 +19,7 @@ class IArtifactStore(ABC):
     """Interface for artifact storage."""
 
     @abstractmethod
-    async def store(self, artifact: DataArtifact) -> FileWithUri:
+    async def store(self, artifact: MessageAttachment) -> FileWithUri:
         """
         Store an artifact and return a file reference.
 
@@ -31,7 +31,7 @@ class IArtifactStore(ABC):
         """
         pass
 
-    async def persist(self, artifacts: list[DataArtifact]) -> list[DataArtifact]:
+    async def persist(self, artifacts: list[MessageAttachment]) -> list[MessageAttachment]:
         """
         Store multiple artifacts and return their file references.
 
@@ -46,7 +46,7 @@ class IArtifactStore(ABC):
         return ref_parts
 
     @abstractmethod
-    async def get(self, file_ref: FileWithUri) -> Optional[DataArtifact]:
+    async def get(self, file_ref: FileWithUri) -> Optional[MessageAttachment]:
         """
         Retrieve an artifact by file reference.
 
@@ -147,9 +147,9 @@ class InMemoryArtifactStore(IArtifactStore):
     """Simple in-memory implementation of artifact storage for testing."""
 
     def __init__(self):
-        self._artifacts: dict[str, DataArtifact] = {}
+        self._artifacts: dict[str, MessageAttachment] = {}
 
-    async def store(self, artifact: DataArtifact) -> FileWithUri:
+    async def store(self, artifact: MessageAttachment) -> FileWithUri:
         """Store an artifact and return a file reference."""
         import uuid
 
@@ -258,7 +258,7 @@ class FilesystemArtifactStore(IArtifactStore):
         """Get the filesystem path for artifact metadata."""
         return self.metadata_dir / f"{artifact_id}.json"
 
-    async def store(self, artifact: DataArtifact) -> FileWithUri:
+    async def store(self, artifact: MessageAttachment) -> FileWithUri:
         """Store an artifact and return a file reference."""
         import uuid
 
@@ -291,7 +291,7 @@ class FilesystemArtifactStore(IArtifactStore):
         # Return a file reference
         return FileWithUri(uri=uri, name=name, mime_type=mime_type)
 
-    async def get(self, file_ref: FileWithUri) -> Optional[DataArtifact]:
+    async def get(self, file_ref: FileWithUri) -> Optional[MessageAttachment]:
         """Retrieve an artifact by file reference."""
         # Extract artifact ID from URI
         # URI format: asta://local/artifacts/{artifact_id}
