@@ -1,12 +1,12 @@
 """Handler agent implementation using A2A SDK."""
-
+import logging
 import uuid
 from typing import Optional
 
 from a2a.client import ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import DataPart, Message, Role, TextPart
+from a2a.types import DataPart, Message, Role, TextPart, FilePart
 
 from a2a_poc.storage import (
     IArtifactStore,
@@ -16,16 +16,13 @@ from a2a_poc.storage import (
 )
 
 
-class HandlerExecutor(AgentExecutor):
+class PassThroughHandler(AgentExecutor):
     """
-    Handler agent executor that manages conversation and delegates to Subagent.
+    Handler agent executor that forwards messages to a single subagent
 
     The Handler is responsible for:
     - Managing conversation history
-    - Persisting artifacts
-    - Building context from conversation history
-    - Delegating tasks to the Subagent
-    - Converting hydrated artifacts to references
+    - Persisting artifacts created by the subagent
     """
 
     def __init__(
@@ -54,92 +51,56 @@ class HandlerExecutor(AgentExecutor):
             context: Request context containing task information
             event_queue: Queue for sending response events
         """
-        # Extract user message
-        user_message_text = ""
-        if context.message:
-            for part in context.message.parts:
-                if isinstance(part, TextPart):
-                    user_message_text += part.text
+        if not context.message:
+            return None
 
         # Store user message in conversation history
-        user_msg = Message(
-            message_id=str(uuid.uuid4()),
-            role=Role.user,
-            parts=[TextPart(text=user_message_text)],
-        )
-        await self.conversation_history.add_message(user_msg)
+        await self.conversation_history.add_message(context.message)
 
         # Send request to Subagent using A2A client
         try:
-            # Get full conversation history
+            # Attach conversation history to the message
             all_messages = await self.conversation_history.get_all_messages()
-
-            # Serialize conversation history for metadata
             history_data = [msg.model_dump() for msg in all_messages]
-
-            # Create message for subagent with history in metadata
-            message = Message(
-                message_id=str(uuid.uuid4()),
-                role=Role.user,
-                parts=[TextPart(text=user_message_text)],
-                metadata={
-                    "conversation_history": history_data,
-                    "history_length": len(all_messages),
-                },
+            asta_metadata = {"asta": {
+                "conversation_history": history_data,
+                "history_length": len(all_messages),
+            }
+            }
+            merged_metadata = (context.message.metadata or {}) | asta_metadata
+            message = context.message.model_copy(
+                deep=True,
+                update = {"metadata": merged_metadata, "task_id": None }
             )
 
-            # Send message and collect responses
-            response_text = "Subagent response received"
-            artifacts_to_persist = []
-
-            # Create A2A client for communicating with subagent
+            # Send message and forward response
             a2a_client = await ClientFactory.connect(agent=self.subagent_url)
             async for event in a2a_client.send_message(message):
-                # Handle Message responses
+                logging.info(f"Received event from Subagent: {event}")
+                # For each forwarded message/event, we need to:
+                # 1. Convert hydrated DataParts to artifact references
+                # 2. Store assistant response in conversation history
+                # 3. Send response to user with artifact references
                 if isinstance(event, Message):
-                    for part in event.parts:
-                        if isinstance(part, TextPart):
-                            response_text = part.text
-                        # Check if it's a DataPart (artifact)
-                        elif isinstance(part, DataPart):
-                            # Persist artifact and get file reference
-                            file_ref = await self.artifact_store.store(part)
-                            artifacts_to_persist.append(file_ref.uri)
+                    ref_parts = await self.artifact_store.persist(message.parts)
+                    modified_message = event.model_copy(deep=True, update = {"parts": ref_parts})
+                    await event_queue.enqueue_event(modified_message)
+                    await self.conversation_history.add_message(modified_message)
 
                 # Handle Task events (tuple of Task and UpdateEvent)
                 elif isinstance(event, tuple) and len(event) == 2:
                     task, update_event = event
-                    # Could process task status updates here if needed
-                    pass
-
-            # Store assistant response in conversation history
-            assistant_parts = [TextPart(text=response_text)]
-            assistant_msg = Message(
-                message_id=str(uuid.uuid4()),
-                role=Role.agent,
-                parts=assistant_parts,
-                metadata={"artifact_refs": artifacts_to_persist} if artifacts_to_persist else None,
-            )
-            await self.conversation_history.add_message(assistant_msg)
-
-            # Send response to user (with artifact references, not hydrated data)
-            response_message = Message(
-                message_id=str(uuid.uuid4()),
-                role=Role.agent,
-                parts=[TextPart(text=response_text)],
-            )
-
-            await event_queue.enqueue_event(response_message)
-
-            if artifacts_to_persist:
-                artifact_info_message = Message(
-                    message_id=str(uuid.uuid4()),
-                    role=Role.agent,
-                    parts=[TextPart(text=f"\nArtifacts stored: {', '.join(artifacts_to_persist)}")],
-                )
-                await event_queue.enqueue_event(artifact_info_message)
+                    modified_artifacts = []
+                    for artifact in task.artifacts:
+                        ref_parts = await self.artifact_store.persist(artifact.parts)
+                        modified_artifact = artifact.model_copy(deep=True, update = {"parts": ref_parts})
+                        modified_artifacts.append(modified_artifact)
+                    modified_task = task.model_copy(deep=True, update = {"artifacts": modified_artifacts})
+                    await event_queue.enqueue_event(modified_task)
+                    await event_queue.enqueue_event(update_event)
 
         except Exception as e:
+            logging.exception(e)
             error_msg = f"Error communicating with Subagent: {str(e)}"
             error_message = Message(
                 message_id=str(uuid.uuid4()),

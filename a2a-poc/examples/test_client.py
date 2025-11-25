@@ -3,56 +3,8 @@
 import asyncio
 import uuid
 
-import httpx
-
-
-async def get_agent_card(base_url: str) -> dict:
-    """
-    Fetch the agent card from an A2A server.
-
-    Args:
-        base_url: Base URL of the A2A server
-
-    Returns:
-        Agent card as dictionary
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/.well-known/agent-card.json", timeout=10.0)
-        response.raise_for_status()
-        return response.json()
-
-
-async def send_task(base_url: str, message: str) -> dict:
-    """
-    Send a task to an A2A server using JSON-RPC.
-
-    Args:
-        base_url: Base URL of the A2A server
-        message: Message text to send
-
-    Returns:
-        Task response as dictionary
-    """
-    message_id = str(uuid.uuid4())
-
-    # A2A uses JSON-RPC protocol
-    rpc_request = {
-        "jsonrpc": "2.0",
-        "method": "message/send",
-        "params": {
-            "message": {
-                "messageId": message_id,
-                "role": "user",
-                "parts": [{"kind": "text", "text": message}],
-            }
-        },
-        "id": str(uuid.uuid4()),
-    }
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(base_url, json=rpc_request, timeout=30.0)
-        response.raise_for_status()
-        return response.json()
+from a2a.client import ClientFactory
+from a2a.types import Message, Role, TextPart
 
 
 async def main():
@@ -61,53 +13,86 @@ async def main():
 
     print("=== A2A Handler Test Client ===\n")
 
-    # Get agent card
-    print("Fetching Handler agent card...")
+    # Connect to the Handler agent using A2A client
+    print("Connecting to Handler agent...")
     try:
-        card = await get_agent_card(handler_url)
-        print(f"Agent: {card.get('name')}")
-        print(f"Description: {card.get('description')}")
-        print(f"Version: {card.get('version')}")
-        print(f"Skills: {[skill.get('name') for skill in card.get('skills', [])]}")
+        client = await ClientFactory.connect(agent=handler_url)
+
+        # Get agent card
+        print("Fetching Handler agent card...")
+        card = await client.get_card()
+        print(f"Agent: {card.name}")
+        print(f"Description: {card.description}")
+        print(f"Version: {card.version}")
+        print(f"Skills: {[skill.name for skill in card.skills]}")
         print()
     except Exception as e:
-        print(f"Error fetching agent card: {e}")
+        print(f"Error connecting to agent: {e}")
         print("Make sure the Handler server is running on http://localhost:9000")
         print("Run: uv run python examples/run_handler.py")
         return
 
-    # Test conversation with multiple messages
-    messages = [
-        "Hello! Can you help me process some data?",
-        "What about analyzing numbers?",
-        "Thanks for your help!",
-    ]
+    # Interactive conversation loop
+    print("Enter your messages (type 'quit' or 'exit' to stop, Ctrl+D for EOF):\n")
 
-    for i, message in enumerate(messages, 1):
-        print(f"Message {i}: {message}")
-        try:
-            result = await send_task(handler_url, message)
+    try:
+        while True:
+            # Read user input
+            try:
+                text = input("You: ").strip()
+            except EOFError:
+                print("\nExiting...")
+                break
 
-            # Extract response from JSON-RPC result
-            if "result" in result:
-                rpc_result = result["result"]
-                if "output" in rpc_result:
-                    output = rpc_result["output"]
-                    if "messages" in output:
-                        for msg in output["messages"]:
-                            for part in msg.get("parts", []):
-                                if part.get("kind") == "text" and "text" in part:
-                                    print(f"Response: {part['text']}")
+            # Check for exit commands
+            if text.lower() in ["quit", "exit", ""]:
+                if text.lower() in ["quit", "exit"]:
+                    print("Goodbye!")
+                break
 
-            print(f"RPC ID: {result.get('id')}")
-            print()
+            try:
+                # Create A2A message
+                message = Message(
+                    message_id=str(uuid.uuid4()),
+                    role=Role.user,
+                    parts=[TextPart(text=text)],
+                )
 
-        except Exception as e:
-            print(f"Error: {e}")
-            print()
+                # Send message and collect responses
 
-        # Small delay between messages
-        await asyncio.sleep(1)
+                print("Agent: ", end="", flush=True)
+                response_printed = False
+
+                async for event in client.send_message(message):
+                    # Handle Message responses
+                    if isinstance(event, Message):
+                        for part in event.parts:
+                            if isinstance(part.root, TextPart):
+                                print(part.root.text)
+                                response_printed = True
+
+                    # Handle Task events (tuple of Task and UpdateEvent)
+                    elif isinstance(event, tuple) and len(event) == 2:
+                        task, update_event = event
+                        # Extract final response from task output
+                        if task.output and task.output.messages:
+                            for msg in task.output.messages:
+                                for part in msg.parts:
+                                    if part.root.kind == "text":
+                                        print(part.root.text)
+                                        response_printed = True
+
+                if not response_printed:
+                    print("(no response)")
+
+                print()
+
+            except Exception as e:
+                print(f"\nError: {e}\n")
+
+    finally:
+        # Clean up
+        await client.close()
 
 
 if __name__ == "__main__":

@@ -6,7 +6,8 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
-from a2a_poc.handler import HandlerExecutor
+from a2a_poc import FilesystemArtifactStore, FilesystemConversationHistory
+from a2a_poc.handler import PassThroughHandler
 from a2a_poc.storage import InMemoryArtifactStore, InMemoryConversationHistory
 
 
@@ -47,20 +48,20 @@ def create_handler_server(
         description="Handler agent that manages conversations, artifacts, and delegates to subagent",
         url=f"http://{host}:{port}/",
         version="1.0.0",
-        defaultInputModes=["text"],
-        defaultOutputModes=["text"],
+        default_input_modes=["text"],
+        default_output_modes=["text"],
         capabilities=AgentCapabilities(streaming=False),
         skills=skills,
-        supportsAuthenticatedExtendedCard=False,
+        supports_authenticated_extended_card=False,
     )
 
     # Initialize storage
-    artifact_store = InMemoryArtifactStore()
-    conversation_history = InMemoryConversationHistory()
+    artifact_store = FilesystemArtifactStore("artifacts")
+    conversation_history = FilesystemConversationHistory("conversations")
 
     # Initialize request handler with handler executor
     request_handler = DefaultRequestHandler(
-        agent_executor=HandlerExecutor(
+        agent_executor=PassThroughHandler(
             subagent_url=subagent_url,
             artifact_store=artifact_store,
             conversation_history=conversation_history,

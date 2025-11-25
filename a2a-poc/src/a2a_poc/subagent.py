@@ -45,8 +45,8 @@ class SubagentExecutor(AgentExecutor):
             user_message = ""
             if context.message:
                 for part in context.message.parts:
-                    if isinstance(part, TextPart):
-                        user_message += part.text
+                    if part.root.kind == "text":
+                        user_message += part.root.text
 
             # Process the message (simple echo with processing indicator)
             result_text = f"Subagent processed: {user_message}"

@@ -31,6 +31,20 @@ class IArtifactStore(ABC):
         """
         pass
 
+    async def persist(self, artifacts: list[DataArtifact]) -> list[DataArtifact]:
+        """
+        Store multiple artifacts and return their file references.
+
+        Args:
+            artifacts: List of artifact data to store
+        """
+        ref_parts = []
+        for artifact in artifacts:
+            file_ref = await self.store(artifact)
+            ref_part = FilePart(file = file_ref, metadata = artifact.metadata)
+            ref_parts.append(ref_part)
+        return ref_parts
+
     @abstractmethod
     async def get(self, file_ref: FileWithUri) -> Optional[DataArtifact]:
         """
