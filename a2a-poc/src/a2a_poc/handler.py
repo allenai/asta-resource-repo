@@ -91,7 +91,7 @@ class PassThroughHandler(AgentExecutor):
                 elif isinstance(event, tuple) and len(event) == 2:
                     task, update_event = event
                     modified_artifacts = []
-                    for artifact in task.artifacts:
+                    for artifact in (task.artifacts or []):
                         ref_parts = await self.artifact_store.persist(artifact.parts)
                         modified_artifact = artifact.model_copy(deep=True, update = {"parts": ref_parts})
                         modified_artifacts.append(modified_artifact)
