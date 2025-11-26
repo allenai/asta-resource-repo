@@ -1,13 +1,14 @@
 """Storage layer interfaces and implementations for artifacts and conversation history."""
 
+import asyncio
+import base64
 import json
+import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Union
 
-from a2a.types import DataPart, FilePart, FileWithUri, Message, TextPart
-
-MessageAttachment = FilePart | DataPart
+from a2a.types import DataPart, FilePart, FileWithBytes, FileWithUri, Message, Part, TextPart
 
 # Data Models - None needed, using A2A types
 
@@ -19,68 +20,47 @@ class IArtifactStore(ABC):
     """Interface for artifact storage."""
 
     @abstractmethod
-    async def store(self, artifact: MessageAttachment) -> FileWithUri:
+    async def store(self, part: TextPart | FilePart | DataPart) -> Optional[FilePart]:
         """
-        Store an artifact and return a file reference.
+        Store any in-line data attached to a DataPart or FilePart, and replace with a FileWithUri.
 
         Args:
-            artifact: The artifact data to store (as a DataPart)
+            part: The artifact data to store (as a DataPart)
 
         Returns:
-            A FileWithUri reference to the stored artifact
+            A FilePart with a URI reference to the data, if stored, else None
         """
         pass
 
-    async def persist(self, artifacts: list[MessageAttachment]) -> list[MessageAttachment]:
+    async def persist(self, parts: list[Part]) -> list[Part]:
         """
-        Store multiple artifacts and return their file references.
+        Store any in-line data attached to a DataPart or FilePart, and replace with a FileWithUri.
+        Leave TextPart and FileWithUri parts unchanged.
 
         Args:
-            artifacts: List of artifact data to store
+            parts: List of parts to persist
         """
-        ref_parts = []
-        for artifact in artifacts:
-            file_ref = await self.store(artifact)
-            ref_part = FilePart(file = file_ref, metadata = artifact.metadata)
-            ref_parts.append(ref_part)
-        return ref_parts
+        async def store_part(part: Part) -> Part:
+            stored_part = await self.store(part.root)
+            if stored_part:
+                return Part(root=stored_part)
+            return part
+        modified_parts = await asyncio.gather(*(store_part(part) for part in parts))
+        return modified_parts
 
     @abstractmethod
-    async def get(self, file_ref: FileWithUri) -> Optional[MessageAttachment]:
+    async def get(self, part: Part) -> Optional[Part]:
         """
-        Retrieve an artifact by file reference.
+        Retrieve an artifact.
+        If part is a FileWithUri, fetch the corresponding DataPart or FilePart.
 
         Args:
-            file_ref: The file reference (FileWithUri) to the artifact
+            part: The file reference (FileWithUri) to the artifact
 
         Returns:
             The artifact data if found, None otherwise
         """
         pass
-
-    @abstractmethod
-    async def delete(self, file_ref: FileWithUri) -> bool:
-        """
-        Delete an artifact by file reference.
-
-        Args:
-            file_ref: The file reference (FileWithUri) to delete
-
-        Returns:
-            True if deleted, False if not found
-        """
-        pass
-
-    @abstractmethod
-    async def list_all(self) -> list[FileWithUri]:
-        """
-        List all artifact references.
-
-        Returns:
-            List of all artifact file references
-        """
-        pass
-
 
 class IConversationHistory(ABC):
     """Interface for conversation history storage."""
@@ -146,51 +126,47 @@ class IConversationHistory(ABC):
 class InMemoryArtifactStore(IArtifactStore):
     """Simple in-memory implementation of artifact storage for testing."""
 
-    def __init__(self):
-        self._artifacts: dict[str, MessageAttachment] = {}
+    def __init__(self, url_prefix: str = "asta://local/artifacts/"):
+        self._artifacts: dict[str, DataPart | FilePart] = {}
+        self._url_prefix = url_prefix
 
-    async def store(self, artifact: MessageAttachment) -> FileWithUri:
+    async def store(self, part: TextPart | FilePart | DataPart) -> Optional[FilePart]:
         """Store an artifact and return a file reference."""
-        import uuid
+
+        if part.kind == "text":
+            # Text parts are not stored as artifacts
+            return None
+        if part.kind == "file" and isinstance(part.file, FileWithUri):
+            # Already a file reference. Don't store
+            return None
 
         # Generate a unique URI for the artifact
         artifact_id = str(uuid.uuid4())
-        uri = f"asta://local/artifacts/{artifact_id}"
+        uri = f"{self._url_prefix}{artifact_id}"
 
         # Store the artifact data
-        self._artifacts[uri] = artifact
+        self._artifacts[uri] = part
 
-        # Extract name and mime_type from metadata if available
-        name = None
-        mime_type = None
-        if artifact.metadata:
-            name = artifact.metadata.get("name")
-            mime_type = artifact.metadata.get("mime_type")
+        if part.kind == "data":
+            # Return a FileWithUri reference
+            file = FileWithUri(uri=uri, name=None, mime_type="application/json")
+            return FilePart(file=file, metadata = part.metadata)
+        elif part.kind == "file":
+            # Return a FileWithUri reference
+            file = FileWithUri(uri=uri, name=part.name, mime_type=part.file.mime_type)
+            return FilePart(file=file, metadata = part.metadata)
+        else:
+            raise ValueError("Artifact must be of kind 'data' or 'file'")
 
-        # Return a file reference
-        return FileWithUri(uri=uri, name=name, mime_type=mime_type)
-
-    async def get(self, file_ref: FileWithUri) -> Optional[DataPart]:
+    async def get(self, part: Part) -> Optional[Part]:
         """Retrieve an artifact by file reference."""
-        return self._artifacts.get(file_ref.uri)
-
-    async def delete(self, file_ref: FileWithUri) -> bool:
-        """Delete an artifact by file reference."""
-        if file_ref.uri in self._artifacts:
-            del self._artifacts[file_ref.uri]
-            return True
-        return False
-
-    async def list_all(self) -> list[FileWithUri]:
-        """List all artifact references."""
-        return [
-            FileWithUri(
-                uri=uri,
-                name=artifact.metadata.get("name") if artifact.metadata else None,
-                mime_type=artifact.metadata.get("mime_type") if artifact.metadata else None,
-            )
-            for uri, artifact in self._artifacts.items()
-        ]
+        if part.root.kind == "file" and isinstance(part.root.file, FileWithUri):
+            if not part.root.file.uri.startswith(self._url_prefix):
+                return None
+            artifact = self._artifacts.get(part.root.file.uri)
+            return Part(root=artifact) if artifact else None
+        else:
+            return None
 
 
 class InMemoryConversationHistory(IConversationHistory):
@@ -235,7 +211,7 @@ class InMemoryConversationHistory(IConversationHistory):
 class FilesystemArtifactStore(IArtifactStore):
     """Filesystem-based implementation of artifact storage."""
 
-    def __init__(self, base_path: str | Path):
+    def __init__(self, base_path: str | Path, url_prefix: str = "asta://local/artifacts/"):
         """
         Initialize the filesystem artifact store.
 
@@ -244,135 +220,76 @@ class FilesystemArtifactStore(IArtifactStore):
         """
         self.base_path = Path(base_path)
         self.artifacts_dir = self.base_path / "artifacts"
-        self.metadata_dir = self.base_path / "metadata"
+        self._url_prefix = url_prefix
 
         # Create directories if they don't exist
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_artifact_path(self, artifact_id: str) -> Path:
         """Get the filesystem path for an artifact."""
         return self.artifacts_dir / artifact_id
 
-    def _get_metadata_path(self, artifact_id: str) -> Path:
-        """Get the filesystem path for artifact metadata."""
-        return self.metadata_dir / f"{artifact_id}.json"
-
-    async def store(self, artifact: MessageAttachment) -> FileWithUri:
+    async def store(self, part: TextPart | DataPart | FilePart) -> Optional[FilePart]:
         """Store an artifact and return a file reference."""
-        import uuid
+        if part.kind == "text":
+            # Text parts are not stored as artifacts
+            return None
+        if part.kind == "file" and isinstance(part.file, FileWithUri):
+            # Already a file reference. Don't store
+            return None
 
         # Generate a unique ID for the artifact
         artifact_id = str(uuid.uuid4())
-        uri = f"asta://local/artifacts/{artifact_id}"
+        uri = f"{self._url_prefix}{artifact_id}"
 
         # Extract name and mime_type from metadata if available
-        name = None
-        mime_type = None
-        if artifact.metadata:
-            name = artifact.metadata.get("name")
-            mime_type = artifact.metadata.get("mime_type")
-
-        # Store the full artifact object as JSON
-        artifact_path = self._get_artifact_path(artifact_id)
-        artifact_data = artifact.model_dump()
-        artifact_path.write_text(json.dumps(artifact_data, indent=2), encoding="utf-8")
-
-        # Store reference metadata separately for quick lookups
-        metadata = {
-            "uri": uri,
-            "name": name,
-            "mime_type": mime_type,
-            "kind": artifact.kind,
-        }
-        metadata_path = self._get_metadata_path(artifact_id)
-        metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
-
-        # Return a file reference
-        return FileWithUri(uri=uri, name=name, mime_type=mime_type)
-
-    async def get(self, file_ref: FileWithUri) -> Optional[MessageAttachment]:
-        """Retrieve an artifact by file reference."""
-        # Extract artifact ID from URI
-        # URI format: asta://local/artifacts/{artifact_id}
-        try:
-            artifact_id = file_ref.uri.split("/")[-1]
-        except (IndexError, AttributeError):
-            return None
-
-        artifact_path = self._get_artifact_path(artifact_id)
-        metadata_path = self._get_metadata_path(artifact_id)
-
-        if not artifact_path.exists() or not metadata_path.exists():
-            return None
-
-        # Load metadata to determine the kind of artifact
-        try:
-            metadata_content = metadata_path.read_text(encoding="utf-8")
-            metadata = json.loads(metadata_content)
-            kind = metadata.get("kind")
-        except (json.JSONDecodeError, OSError):
-            return None
-
-        # Load artifact data
-        try:
-            artifact_content = artifact_path.read_text(encoding="utf-8")
-            artifact_data = json.loads(artifact_content)
-        except (json.JSONDecodeError, OSError):
-            return None
-
-        # Deserialize to the correct type based on kind
-        if kind == "text":
-            return TextPart.model_validate(artifact_data)
-        elif kind == "data":
-            return DataPart.model_validate(artifact_data)
-        elif kind == "file":
-            return FilePart.model_validate(artifact_data)
+        if part.kind == "data":
+            artifact_path = self._get_artifact_path(artifact_id)
+            artifact_data = part.model_dump()
+            artifact_path.write_text(json.dumps(artifact_data, indent=2), encoding="utf-8")
+            file = FileWithUri(uri=uri, name=None, mime_type="application/json")
+            return FilePart(file=file, metadata=part.metadata)
+        elif part.kind == "file":
+            artifact_path = self._get_artifact_path(artifact_id)
+            artifact_path.write_bytes(base64.b64decode(part.file.bytes))
+            file = FileWithUri(uri=uri, name=None, mime_type=part.file.mime_type)
+            return FilePart(file=file, metadata=part.metadata)
         else:
+            raise ValueError("Artifact must be of kind 'data' or 'file'")
+
+
+    async def get(self, part: Part) -> Optional[Part]:
+        """Retrieve an artifact by file reference."""
+        if part.root.kind  in ("text", "data"):
+            # Text parts are not stored as artifacts
+            return None
+        if part.root.kind == "file" and not isinstance(part.root.file, FileWithUri):
             return None
 
-    async def delete(self, file_ref: FileWithUri) -> bool:
-        """Delete an artifact by file reference."""
+        if not part.root.file.uri.startswith(self._url_prefix):
+            return None
+
+        file: FileWithUri = part.root.file
         try:
-            artifact_id = file_ref.uri.split("/")[-1]
+            artifact_id = file.uri.split("/")[-1]
         except (IndexError, AttributeError):
-            return False
+            raise ValueError("Invalid FileWithUri format")
 
         artifact_path = self._get_artifact_path(artifact_id)
-        metadata_path = self._get_metadata_path(artifact_id)
 
-        deleted = False
-        if artifact_path.exists():
-            artifact_path.unlink()
-            deleted = True
+        if not artifact_path.exists():
+            raise ValueError(f"Could not find artifact {artifact_id}")
 
-        if metadata_path.exists():
-            metadata_path.unlink()
-            deleted = True
-
-        return deleted
-
-    async def list_all(self) -> list[FileWithUri]:
-        """List all artifact references."""
-        result = []
-
-        for metadata_file in self.metadata_dir.glob("*.json"):
+        artifact_bytes = artifact_path.read_bytes()
+        if file.mime_type == "application/json":
             try:
-                metadata_content = metadata_file.read_text(encoding="utf-8")
-                metadata = json.loads(metadata_content)
-
-                result.append(
-                    FileWithUri(
-                        uri=metadata["uri"],
-                        name=metadata.get("name"),
-                        mime_type=metadata.get("mime_type"),
-                    )
-                )
-            except (json.JSONDecodeError, OSError, KeyError):
-                # Skip invalid metadata files
-                continue
-
-        return result
+                artifact_data = json.loads(artifact_bytes)
+                return Part(root = DataPart(data=artifact_data, metadata = part.root.metadata))
+            except (json.JSONDecodeError, OSError):
+                raise ValueError(f"Could not decode artifact {artifact_id}")
+        else:
+            encoded_bytes = base64.b64encode(artifact_bytes)
+            return Part(root = FilePart(file=FileWithBytes(bytes=encoded_bytes, name=file.name, mime_type=file.mime_type), metadata = part.root.metadata))
 
 
 class FilesystemConversationHistory(IConversationHistory):

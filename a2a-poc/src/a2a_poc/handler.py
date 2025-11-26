@@ -6,7 +6,7 @@ from typing import Optional
 from a2a.client import ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import DataPart, Message, Role, TextPart, FilePart
+from a2a.types import Message, Role, TextPart
 
 from a2a_poc.storage import (
     IArtifactStore,
@@ -82,7 +82,7 @@ class PassThroughHandler(AgentExecutor):
                 # 2. Store assistant response in conversation history
                 # 3. Send response to user with artifact references
                 if isinstance(event, Message):
-                    ref_parts = await self.artifact_store.persist(message.parts)
+                    ref_parts = await self.artifact_store.persist(event.parts)
                     modified_message = event.model_copy(deep=True, update = {"parts": ref_parts})
                     await event_queue.enqueue_event(modified_message)
                     await self.conversation_history.add_message(modified_message)

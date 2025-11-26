@@ -8,7 +8,6 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 from a2a_poc import FilesystemArtifactStore, FilesystemConversationHistory
 from a2a_poc.handler import PassThroughHandler
-from a2a_poc.storage import InMemoryArtifactStore, InMemoryConversationHistory
 
 
 def create_handler_server(

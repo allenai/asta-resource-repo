@@ -1,12 +1,12 @@
 """Subagent implementation using A2A SDK."""
 
-import uuid
 import logging
+import uuid
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
-from a2a.server.tasks.task_store import TaskStore
 from a2a.server.events import EventQueue
-from a2a.types import Message, Role, TextPart, Task, TaskStatus, TaskState
+from a2a.server.tasks.task_store import TaskStore
+from a2a.types import Message, Role, Task, TaskState, TaskStatus, TextPart
 
 
 class AsyncAgent(AgentExecutor):
@@ -120,8 +120,8 @@ class SyncAgent(AgentExecutor):
                 part.root.text for part in context.message.parts if part.root.kind == "text")
 
             # Process the message (simple echo with processing indicator)
-            reversed = "".join(c for c in reversed(user_message))
-            result_text = f"You say '{user_message}'. I say '{reversed}'"
+            reversed_msg = "".join(c for c in reversed(user_message))
+            result_text = f"You say '{user_message}'. I say '{reversed_msg}'"
 
             # Create response message
             response_message = Message(
