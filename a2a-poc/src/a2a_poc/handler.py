@@ -7,7 +7,7 @@ import httpx
 from a2a.client import ClientConfig, ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
-from a2a.types import Message, Role, TextPart
+from a2a.types import Message, Part, Role, TaskArtifactUpdateEvent, TextPart
 
 from a2a_poc.storage import (
     IArtifactStore,
@@ -86,11 +86,11 @@ class PassThroughHandler(AgentExecutor):
                 agent=self.subagent_url,
                 client_config=client_config,
             )
+            # Forward messages/tasks from the subagent to the client
+            # Intercept any artifacts and persist them in the artifact store,
+            # replacing them with FileArtifact references
             async for event in a2a_client.send_message(message):
-                # For each forwarded message/event, we need to:
-                # 1. Convert hydrated DataParts to artifact references
-                # 2. Store assistant response in conversation history
-                # 3. Send response to user with artifact references
+                # Forward plain message
                 if isinstance(event, Message):
                     logging.info(f"Received Message with {len(event.parts)} parts")
                     ref_parts = await self.artifact_store.persist(event.parts)
@@ -98,7 +98,9 @@ class PassThroughHandler(AgentExecutor):
                     await event_queue.enqueue_event(modified_message)
                     await self.conversation_history.add_message(modified_message)
 
-                # Handle Task events (tuple of Task and UpdateEvent)
+                # The send_message() iterator yields task,event tuples
+                # The events are what is received by the server
+                # The task object is updated on the client side with the data from the incoming events
                 elif isinstance(event, tuple) and len(event) == 2:
                     task, update_event = event
                     if not update_event:
@@ -106,6 +108,7 @@ class PassThroughHandler(AgentExecutor):
                         logging.info(f"Received Task: {task.id}, ")
                         modified_artifacts = []
                         for artifact in (task.artifacts or []):
+                            # Persist artifact parts and replace with reference
                             ref_parts = await self.artifact_store.persist(artifact.parts)
                             modified_artifact = artifact.model_copy(deep=True, update = {"parts": ref_parts})
                             modified_artifacts.append(modified_artifact)
@@ -116,7 +119,8 @@ class PassThroughHandler(AgentExecutor):
                         # Task update event
                         logging.info(f"Received {type(update_event).__name__} for Task: {task.id}")
                         modified_event = update_event.model_copy(deep=True, update = {"task_id": handler_task_id})
-                        if hasattr(update_event, "artifact") and update_event.artifact:
+                        if isinstance(update_event, TaskArtifactUpdateEvent):
+                            # Persist artifact parts and replace with reference
                             ref_parts = await self.artifact_store.persist(update_event.artifact.parts)
                             modified_artifact = update_event.artifact.model_copy(deep=True, update = {"parts": ref_parts})
                             modified_event = modified_event.model_copy(deep=True, update = {"artifact": modified_artifact})
@@ -128,7 +132,7 @@ class PassThroughHandler(AgentExecutor):
             error_message = Message(
                 message_id=str(uuid.uuid4()),
                 role=Role.agent,
-                parts=[TextPart(text=error_msg)],
+                parts=[Part(root=TextPart(text=error_msg))],
             )
             await event_queue.enqueue_event(error_message)
 
@@ -136,7 +140,7 @@ class PassThroughHandler(AgentExecutor):
             error_history_msg = Message(
                 message_id=str(uuid.uuid4()),
                 role=Role.agent,
-                parts=[TextPart(text=error_msg)],
+                parts=[Part(root=TextPart(text=error_msg))],
             )
             await self.conversation_history.add_message(error_history_msg)
 
@@ -151,7 +155,7 @@ class PassThroughHandler(AgentExecutor):
         cancel_message = Message(
             message_id=str(uuid.uuid4()),
             role=Role.agent,
-            parts=[TextPart(text=f"Task {context.task_id} cancellation requested")],
+            parts=[Part(root=TextPart(text=f"Task {context.task_id} cancellation requested"))],
         )
         await event_queue.enqueue_event(cancel_message)
 

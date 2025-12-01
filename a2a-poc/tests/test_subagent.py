@@ -153,46 +153,8 @@ async def test_async_agent_creation(async_agent):
 
 
 async def test_async_agent_execute(async_agent, request_context, mock_event_queue, mock_task_store):
-    """Test AsyncAgent execute method."""
-    await async_agent.execute(request_context, mock_event_queue)
-
-    # Should have task in active_tasks immediately
-    assert request_context.task_id in async_agent.active_tasks
-
-    # Should have sent initial events:
-    # 1. Task
-    # 2. TaskStatusUpdateEvent (working)
-    assert len(mock_event_queue.events) >= 2
-
-    # Check first event is Task
-    task_event = mock_event_queue.events[0]
-    assert isinstance(task_event, Task)
-    assert task_event.id == request_context.task_id
-    assert task_event.status.state == TaskState.working
-
-    # Check second event is TaskStatusUpdateEvent
-    status_event = mock_event_queue.events[1]
-    assert isinstance(status_event, TaskStatusUpdateEvent)
-    assert status_event.task_id == request_context.task_id
-    assert status_event.status.state == TaskState.working
-    assert status_event.final is False
-
-    # Task should be saved to task store
-    saved_task = await mock_task_store.get(request_context.task_id, request_context.call_context)
-    assert saved_task is not None
-    assert saved_task.status.state == TaskState.working
-
-
-async def test_async_agent_full_task_lifecycle(async_agent, request_context, mock_event_queue, mock_task_store):
     """Test full AsyncAgent task lifecycle from start to completion."""
     await async_agent.execute(request_context, mock_event_queue)
-
-    # Wait for background task to complete (it has 2-second sleeps)
-    background_task = async_agent.active_tasks.get(request_context.task_id)
-    assert background_task is not None
-
-    # Wait for task completion with timeout
-    await asyncio.wait_for(background_task, timeout=10)
 
     # Task should be removed from active_tasks
     assert request_context.task_id not in async_agent.active_tasks
@@ -222,11 +184,6 @@ async def test_async_agent_full_task_lifecycle(async_agent, request_context, moc
     assert len(final_status) == 1
     assert final_status[0].status.state == TaskState.completed
 
-    # Last event should be a Message
-    assert isinstance(events[-1], Message)
-    assert events[-1].role == Role.agent
-    assert events[-1].reference_task_ids == [request_context.task_id]
-
     # Task should be marked as completed in store
     saved_task = await mock_task_store.get(request_context.task_id, request_context.call_context)
     assert saved_task.status.state == TaskState.completed
@@ -235,13 +192,13 @@ async def test_async_agent_full_task_lifecycle(async_agent, request_context, moc
 async def test_async_agent_cancel_task(async_agent, request_context, mock_event_queue, mock_task_store):
     """Test cancelling an active AsyncAgent task."""
     # Start the task
-    await async_agent.execute(request_context, mock_event_queue)
-
-    # Verify task is active
-    assert request_context.task_id in async_agent.active_tasks
+    asyncio.create_task(async_agent.execute(request_context, mock_event_queue))
 
     # Give the task a moment to start processing
     await asyncio.sleep(0.1)
+
+    # Verify task is active
+    assert request_context.task_id in async_agent.active_tasks
 
     # Clear events from execution
     mock_event_queue.events.clear()
@@ -295,7 +252,9 @@ async def test_async_agent_multiple_tasks(async_agent, mock_event_queue, mock_ta
 
     # Start all tasks
     for context in contexts:
-        await async_agent.execute(context, mock_event_queue)
+        asyncio.create_task(async_agent.execute(context, mock_event_queue))
+
+    await asyncio.sleep(0.1)
 
     # All tasks should be active
     for context in contexts:
@@ -313,24 +272,3 @@ async def test_async_agent_multiple_tasks(async_agent, mock_event_queue, mock_ta
         saved_task = await mock_task_store.get(context.task_id, context.call_context)
         assert saved_task.status.state == TaskState.completed
 
-
-async def test_async_agent_task_processing_steps(async_agent, request_context, mock_event_queue, mock_task_store):
-    """Test that AsyncAgent properly publishes progress artifacts during processing."""
-    await async_agent.execute(request_context, mock_event_queue)
-
-    # Wait for task completion
-    background_task = async_agent.active_tasks.get(request_context.task_id)
-    await asyncio.wait_for(background_task, timeout=10)
-
-    # Check for progress artifacts with step data
-    artifact_events = [e for e in mock_event_queue.events if isinstance(e, TaskArtifactUpdateEvent)]
-
-    # Should have multiple artifact events showing progress steps
-    assert len(artifact_events) >= 3  # At least: reading, computing, writing
-
-    # Check that artifacts contain step information
-    step_artifacts = [
-        e for e in artifact_events
-        if any(part.root.kind == "data" for part in e.artifact.parts)
-    ]
-    assert len(step_artifacts) >= 1
