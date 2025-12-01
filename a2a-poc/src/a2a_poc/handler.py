@@ -3,7 +3,8 @@ import logging
 import uuid
 from typing import Optional
 
-from a2a.client import ClientFactory
+import httpx
+from a2a.client import ClientConfig, ClientFactory
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.types import Message, Role, TextPart
@@ -68,20 +69,30 @@ class PassThroughHandler(AgentExecutor):
             }
             }
             merged_metadata = (context.message.metadata or {}) | asta_metadata
+            # The handler and subagent will have distinct task_ids for the same request
+            # Clear the auto-assigned task_id here to allow the subagent to assign its own task_id
+            # Below, we reassign the handler's task_id to the response
+            handler_task_id = context.task_id
             message = context.message.model_copy(
                 deep=True,
                 update = {"metadata": merged_metadata, "task_id": None }
             )
 
             # Send message and forward response
-            a2a_client = await ClientFactory.connect(agent=self.subagent_url)
+            # Increase timeout to handle long-running subagent operations
+            httpx_client = httpx.AsyncClient(timeout=120.0)
+            client_config = ClientConfig(httpx_client=httpx_client, streaming=True)
+            a2a_client = await ClientFactory.connect(
+                agent=self.subagent_url,
+                client_config=client_config,
+            )
             async for event in a2a_client.send_message(message):
-                logging.info(f"Received event from Subagent: {event}")
                 # For each forwarded message/event, we need to:
                 # 1. Convert hydrated DataParts to artifact references
                 # 2. Store assistant response in conversation history
                 # 3. Send response to user with artifact references
                 if isinstance(event, Message):
+                    logging.info(f"Received Message with {len(event.parts)} parts")
                     ref_parts = await self.artifact_store.persist(event.parts)
                     modified_message = event.model_copy(deep=True, update = {"parts": ref_parts})
                     await event_queue.enqueue_event(modified_message)
@@ -90,14 +101,26 @@ class PassThroughHandler(AgentExecutor):
                 # Handle Task events (tuple of Task and UpdateEvent)
                 elif isinstance(event, tuple) and len(event) == 2:
                     task, update_event = event
-                    modified_artifacts = []
-                    for artifact in (task.artifacts or []):
-                        ref_parts = await self.artifact_store.persist(artifact.parts)
-                        modified_artifact = artifact.model_copy(deep=True, update = {"parts": ref_parts})
-                        modified_artifacts.append(modified_artifact)
-                    modified_task = task.model_copy(deep=True, update = {"artifacts": modified_artifacts})
-                    await event_queue.enqueue_event(modified_task)
-                    await event_queue.enqueue_event(update_event)
+                    if not update_event:
+                        # Initial task creation
+                        logging.info(f"Received Task: {task.id}, ")
+                        modified_artifacts = []
+                        for artifact in (task.artifacts or []):
+                            ref_parts = await self.artifact_store.persist(artifact.parts)
+                            modified_artifact = artifact.model_copy(deep=True, update = {"parts": ref_parts})
+                            modified_artifacts.append(modified_artifact)
+                        # Reassign the handler's task_id to the result
+                        modified_task = task.model_copy(deep=True, update = {"artifacts": modified_artifacts, "id": handler_task_id})
+                        await event_queue.enqueue_event(modified_task)
+                    else:
+                        # Task update event
+                        logging.info(f"Received {type(update_event).__name__} for Task: {task.id}")
+                        modified_event = update_event.model_copy(deep=True, update = {"task_id": handler_task_id})
+                        if hasattr(update_event, "artifact") and update_event.artifact:
+                            ref_parts = await self.artifact_store.persist(update_event.artifact.parts)
+                            modified_artifact = update_event.artifact.model_copy(deep=True, update = {"parts": ref_parts})
+                            modified_event = modified_event.model_copy(deep=True, update = {"artifact": modified_artifact})
+                        await event_queue.enqueue_event(modified_event)
 
         except Exception as e:
             logging.exception(e)

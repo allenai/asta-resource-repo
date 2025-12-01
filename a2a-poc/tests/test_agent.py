@@ -3,26 +3,21 @@
 import asyncio
 import uuid
 from typing import Any, List
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from a2a.server.agent_execution import RequestContext
 from a2a.server.context import ServerCallContext
-from a2a.server.events import EventQueue
-from a2a.server.tasks.task_store import TaskStore
 from a2a.types import (
-    Artifact,
     Message,
     MessageSendParams,
     Role,
     Task,
     TaskArtifactUpdateEvent,
     TaskState,
-    TaskStatus,
     TaskStatusUpdateEvent,
     TextPart,
 )
+
 from a2a_poc.subagent import AsyncAgent, SyncAgent
 
 
@@ -339,4 +334,3 @@ async def test_async_agent_task_processing_steps(async_agent, request_context, m
         if any(part.root.kind == "data" for part in e.artifact.parts)
     ]
     assert len(step_artifacts) >= 1
-®

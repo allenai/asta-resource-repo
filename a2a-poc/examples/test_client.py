@@ -1,10 +1,12 @@
 """Test client for interacting with the Handler A2A server."""
 
 import asyncio
+import logging
 import uuid
 
-from a2a.client import ClientFactory
-from a2a.types import Message, Role, TextPart
+import httpx
+from a2a.client import ClientConfig, ClientFactory
+from a2a.types import Message, Role, TaskState, TextPart
 
 
 async def main():
@@ -16,7 +18,9 @@ async def main():
     # Connect to the Handler agent using A2A client
     print("Connecting to Handler agent...")
     try:
-        client = await ClientFactory.connect(agent=handler_url)
+        httpx_client = httpx.AsyncClient(timeout=120.0)
+        client_config = ClientConfig(httpx_client=httpx_client)
+        client = await ClientFactory.connect(agent=handler_url, client_config=client_config)
 
         # Get agent card
         print("Fetching Handler agent card...")
@@ -75,12 +79,20 @@ async def main():
                     elif isinstance(event, tuple) and len(event) == 2:
                         task, update_event = event
                         # Extract final response from task output
-                        if task.output and task.output.messages:
-                            for msg in task.output.messages:
+                        print(f"Status: {task.status}")
+                        if task.status.state == TaskState.completed:
+                            for msg in task.artifacts:
                                 for part in msg.parts:
                                     if part.root.kind == "text":
                                         print(part.root.text)
                                         response_printed = True
+                                    elif part.root.kind == "data":
+                                        print(f"[DataPart: {part.root.data}]")
+                                        response_printed = True
+                                    elif part.root.kind == "file":
+                                        print(f"[FilePart: {part.root.file}]")
+                                        response_printed = True
+
 
                 if not response_printed:
                     print("(no response)")
@@ -88,6 +100,7 @@ async def main():
                 print()
 
             except Exception as e:
+                logging.exception(e)
                 print(f"\nError: {e}\n")
 
     finally:

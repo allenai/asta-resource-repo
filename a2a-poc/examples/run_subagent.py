@@ -6,7 +6,7 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
-from a2a_poc.subagent import SyncAgent, AsyncAgent
+from a2a_poc.subagent import AsyncAgent
 
 
 def create_subagent_server(host: str = "0.0.0.0", port: int = 9001) -> A2AStarletteApplication:
@@ -39,7 +39,7 @@ def create_subagent_server(host: str = "0.0.0.0", port: int = 9001) -> A2AStarle
         version="1.0.0",
         default_input_modes=["text"],
         default_output_modes=["text"],
-        capabilities=AgentCapabilities(streaming=False),
+        capabilities=AgentCapabilities(streaming=True),
         skills=skills,
         supports_authenticated_extended_card=False,
     )

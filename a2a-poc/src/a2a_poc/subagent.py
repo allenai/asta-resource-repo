@@ -10,16 +10,16 @@ from a2a.server.events import EventQueue
 from a2a.server.tasks.task_store import TaskStore
 from a2a.types import (
     Artifact,
+    DataPart,
     Message,
+    Part,
     Role,
     Task,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
-    Part,
     TextPart,
-    DataPart,
 )
 
 
@@ -73,14 +73,31 @@ class AsyncAgent(AgentExecutor):
             )
             await event_queue.enqueue_event(status_update)
 
+            # Start heartbeat task to keep connection alive
+            heartbeat_task = asyncio.create_task(
+                self._send_heartbeat(task_id, context_id, event_queue)
+            )
+
             # Create and start background task to do the actual work
             background_task = asyncio.create_task(
                 self._process_task(task_id, context_id, user_message, context, event_queue)
             )
             self.active_tasks[task_id] = background_task
 
+            try:
+                # Wait for the background task to complete
+                # This keeps the event_queue open until all events are published
+                await background_task
+            finally:
+                # Cancel heartbeat task
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass  # Expected when heartbeat is cancelled
+
         except Exception as e:
-            logging.error(f"Error starting task {task_id}: {e}")
+            logging.exception(f"Error starting task {task_id}: {e}")
             # Update task to failed status
             failed_task = Task(
                 id=task_id,
@@ -98,6 +115,35 @@ class AsyncAgent(AgentExecutor):
                     final=True,
                 )
             )
+
+    async def _send_heartbeat(self, task_id: str, context_id: str, event_queue: EventQueue) -> None:
+        """
+        Send periodic keepalive heartbeat events to prevent client timeout.
+        Runs until cancelled.
+
+        Args:
+            task_id: The task ID
+            context_id: The context ID
+            event_queue: Queue for sending response events
+        """
+        heartbeat_interval = 1.0  # Send heartbeat every second
+
+        try:
+            while True:
+                await asyncio.sleep(heartbeat_interval)
+
+                # Send keepalive status update
+                heartbeat_event = TaskStatusUpdateEvent(
+                    task_id=task_id,
+                    context_id=context_id,
+                    status=TaskStatus(state=TaskState.working),
+                    final=False,
+                )
+                await event_queue.enqueue_event(heartbeat_event)
+        except asyncio.CancelledError:
+            # Heartbeat was cancelled - task is complete
+            logging.debug(f"Heartbeat for task {task_id} cancelled")
+            raise
 
     async def _process_task(
         self, task_id: str, context_id: str, user_message: str, context: RequestContext, event_queue: EventQueue
@@ -180,7 +226,7 @@ class AsyncAgent(AgentExecutor):
                 message_id=str(uuid.uuid4()),
                 role=Role.agent,
                 task_id=task_id,
-                parts=[Part(root=TextPart(text=f"Task completed successfully!"))],
+                parts=[Part(root=TextPart(text="Task completed successfully!"))],
             )
             await event_queue.enqueue_event(completion_message)
 

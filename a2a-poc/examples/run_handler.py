@@ -1,4 +1,5 @@
 """Run the Handler A2A server."""
+import logging
 
 import uvicorn
 from a2a.server.apps import A2AStarletteApplication
@@ -8,6 +9,8 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 from a2a_poc import FilesystemArtifactStore, FilesystemConversationHistory
 from a2a_poc.handler import PassThroughHandler
+
+logging.basicConfig(level=logging.INFO)
 
 
 def create_handler_server(
@@ -49,7 +52,7 @@ def create_handler_server(
         version="1.0.0",
         default_input_modes=["text"],
         default_output_modes=["text"],
-        capabilities=AgentCapabilities(streaming=False),
+        capabilities=AgentCapabilities(streaming=True),
         skills=skills,
         supports_authenticated_extended_card=False,
     )
