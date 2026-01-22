@@ -67,3 +67,9 @@ out/
 *.swp
 temp/
 tmp/
+.asta/
+
+# Unrelated directories
+a2a-poc/
+a2a-samples/
+docs/

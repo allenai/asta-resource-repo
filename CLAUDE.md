@@ -1,72 +1,319 @@
-# CLAUDE.md
+# CLAUDE.md - Developer Guide
+
+**Audience**: This file is for **agent-developers** working on the asta-resource-repo codebase itself.
+
+**For agent-users** (using this tool for document management): See [README.md](README.md) and [MCP_SETUP.md](MCP_SETUP.md) instead.
+
+---
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
-The Asta Resource Repository is an MCP (Model Context Protocol) server that provides centralized document storage with PostgreSQL backend. It exposes both MCP tools (for Claude Desktop/Code) and REST API endpoints for document management operations.
+The Asta Resource Repository is a lightweight, git-friendly document metadata index that requires zero external dependencies. It provides MCP (Model Context Protocol) tools and a CLI for managing document metadata locally.
 
-**Key Concept**: Documents are identified by URIs in the format `asta://{namespace}/{resource_type}/{uuid}`, where `namespace` is the namespace identifier (e.g., "local-postgres"), `resource_type` is the resource type (e.g., "document" for uploaded documents, "user" for users), and `uuid` is the resource's unique identifier.
+**Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by URIs in the format `asta://{namespace}/{resource_type}/{uuid}`.
 
 ## Architecture
 
-### Dual Server Model
+### Local-Only Design
 
-The application has two distinct server modes:
-
-1. **Unified Server** (`server.py`): Runs both MCP (via HTTP/SSE) and REST API endpoints together
-   - MCP endpoints mounted at `/mcp`
-   - REST API endpoints at `/rest`
-   - API documentation at `/docs`
-   - Entry point: `asta-resources-server` command
-
-2. **MCP-only Server** (`mcp_server.py`): Dedicated MCP server using stdio transport
-   - For use with Claude Desktop/Code via stdio
-   - Entry point: `asta-resources-mcp` command
+**No Databases, No Servers, No Docker**
+- Single YAML file (`.asta/index.yaml`) stores all metadata
+- No PostgreSQL, no REST API, no external services
+- Git-friendly: diffs show exactly what changed
+- Portable: copy `.asta/` folder to any project
 
 ### Core Components
 
-- **`mcp_tools.py`**: Defines MCP tools (`upload_document`, `get_document`, `list_documents`, `search_documents`)
-- **`rest_api.py`**: REST API router with FastAPI endpoints
-- **`document_store/postgres.py`**: PostgreSQL backend for document storage
-- **`model.py`**: Data models for documents (DocumentMetadata, Document, BinaryDocument, SearchHit)
-- **`config/`**: HOCON-based configuration system with environment variable overrides
-- **`cli/chatbot.py`**: Interactive chatbot CLI using MCP client
+1. **`document_store/local_index.py`**: YAML-based storage backend
+   - File locking for thread safety
+   - Atomic writes
+   - In-memory search across metadata fields
 
-### Configuration System
+2. **`mcp_tools.py`**: MCP tool definitions
+   - `add_document`: Add document metadata to index
+   - `get_document`: Retrieve metadata by URI
+   - `list_documents`: List all documents
+   - `search_documents`: Search across name, summary, tags, extra fields
 
-Configuration uses HOCON format (Human-Optimized Config Object Notation) with environment variable substitution:
+3. **`mcp_server.py`**: Stdio transport MCP server
+   - Entry point for Claude Desktop/Code integration
+   - Single-user model (no authentication)
 
-- Default config: `src/asta/resources/config/local.conf`
-- Environment-specific config loaded via `ENV` environment variable
-- Key configurations:
-  - `server.host`, `server.port`: Server binding
-  - `storage.postgres.namespace`: Namespace identifier for URIs
-  - `storage.postgres.resource_type`: Resource type for documents (default: "document")
-  - `storage.postgres.url`: PostgreSQL connection string
-  - `limits.max_file_size_mb`: Document size limit
+4. **`cli/index_cli.py`**: Command-line interface
+   - `asta-index` commands for manual management
+   - Human-friendly output with `--json` option
 
-Environment variables override config values:
+5. **`model.py`**: Data models
+   - `DocumentMetadata`: Metadata-only model (no content field)
+   - Fields: `uri`, `name`, `url`, `summary`, `tags`, `mime_type`, `created_at`, `modified_at`, `extra`
+
+6. **`config/`**: HOCON-based configuration
+   - Default: `.asta/index.yaml`
+   - Environment variable overrides
+
+## Document Model
+
+### DocumentMetadata Fields
+
+**Required fields:**
+- `url`: Where the actual document content lives (HTTP/HTTPS URL)
+- `name`: Document title/name
+- `summary`: Text description for search (required for all documents)
+- `mime_type`: Document MIME type (e.g., `application/pdf`, `text/plain`)
+- `tags`: List of tags for categorization (can be empty list)
+
+**Optional fields:**
+- `uri`: Auto-generated if not provided (`asta://{namespace}/{resource_type}/{uuid}`)
+- `created_at`: Auto-set on creation
+- `modified_at`: Auto-updated on changes
+- `extra`: Dict for additional metadata (author, year, venue, etc.)
+
+**Removed from previous versions:**
+- ~~`content`~~ - Never stored locally
+- ~~`size`~~ - Not relevant without content storage
+- ~~`owner_uri`~~ - Single-user model
+
+### Index File Structure
+
+The `.asta/index.yaml` file contains:
+
+```yaml
+version: "1.0"
+namespace: "local-index"
+
+documents:
+  - uri: "asta://local-index/document/550e8400-e29b-41d4-a716-446655440000"
+    name: "Attention Is All You Need"
+    url: "https://arxiv.org/pdf/1706.03762.pdf"
+    summary: "Seminal paper introducing the Transformer architecture"
+    tags: ["ai", "research", "transformers", "nlp"]
+    mime_type: "application/pdf"
+    created_at: "2026-02-06T10:00:00+00:00"
+    modified_at: "2026-02-06T10:00:00+00:00"
+    extra:
+      author: "Vaswani et al"
+      year: 2017
+      venue: "NeurIPS"
+```
+
+## Configuration
+
+Configuration uses HOCON format with environment variable overrides.
+
+**Default config** (`src/asta/resources/config/local.conf`):
+```hocon
+storage {
+  backend = "local-index"
+
+  local-index {
+    namespace = "local-index"
+    index_path = ".asta/index.yaml"
+    resource_type = "document"
+  }
+}
+
+allowed_mime_types = [
+  "application/json",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/html"
+]
+```
+
+**Environment variable overrides:**
 - `NAMESPACE`: Override namespace identifier
 - `RESOURCE_TYPE`: Override resource type
-- `POSTGRES_URL`: Override database connection
-- `POSTGRES_HOST`, `POSTGRES_PORT`: Individual connection parameters
-- `SERVER_PORT`: Override server port
-- `MAX_FILE_SIZE_MB`: Override file size limit
+- `INDEX_PATH`: Override index file path
+- `CONFIG_FILE`: Use different config file
+- `ENV`: Load environment-specific config (e.g., `production.conf`)
+
+## MCP Tools
+
+### add_document
+
+Add document metadata to the index.
+
+```python
+await add_document(
+    url="https://arxiv.org/pdf/1706.03762.pdf",
+    name="Attention Is All You Need",
+    summary="Transformer architecture paper introducing attention mechanisms",
+    mime_type="application/pdf",
+    tags=["ai", "research", "transformers"],
+    extra_metadata={"author": "Vaswani et al", "year": 2017}
+)
+```
+
+**Returns**: `DocumentMetadata` with generated URI
+
+### get_document
+
+Retrieve document metadata by URI.
+
+```python
+doc = await get_document(
+    document_uri="asta://local-index/document/550e8400-..."
+)
+```
+
+**Returns**: `DocumentMetadata` or `None` if not found
+
+### list_documents
+
+List all documents in the index.
+
+```python
+docs = await list_documents()
+```
+
+**Returns**: `list[DocumentMetadata]`
+
+### search_documents
+
+Search documents by query string.
+
+```python
+hits = await search_documents(
+    query="transformer architecture",
+    limit=10
+)
+```
+
+Searches across: `name`, `summary`, `tags`, `extra` fields
+**Returns**: `list[SearchHit]` ranked by relevance
+
+## CLI Commands
+
+### Installation
+
+```bash
+# Install project
+uv sync
+
+# Verify CLI is available
+uv run asta-index --help
+```
+
+### Usage
+
+```bash
+# Add a document
+uv run asta-index add https://arxiv.org/pdf/1706.03762.pdf \
+  --name="Attention Is All You Need" \
+  --summary="Transformer architecture paper" \
+  --tags="ai,research,transformers" \
+  --mime-type="application/pdf" \
+  --extra='{"author": "Vaswani et al", "year": 2017}'
+
+# List all documents
+uv run asta-index list
+
+# List with tag filter
+uv run asta-index list --tags="ai,research"
+
+# List with verbose output
+uv run asta-index list -v
+
+# Search documents
+uv run asta-index search "transformer"
+
+# Get specific document
+uv run asta-index get asta://local-index/document/UUID
+
+# Remove document
+uv run asta-index remove asta://local-index/document/UUID
+
+# Show index information
+uv run asta-index show
+
+# JSON output (for scripting)
+uv run asta-index list --json
+```
+
+## MCP Integration
+
+### Claude Desktop Setup
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "asta-resources": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/asta-resource-repo",
+        "asta-resources-mcp"
+      ]
+    }
+  }
+}
+```
+
+Restart Claude Desktop, then use MCP tools from chat:
+- "Add a document about Transformers at https://arxiv.org/..."
+- "List all documents tagged with 'ai'"
+- "Search for papers about attention mechanisms"
+
+### MCP Server (Stdio)
+
+Run standalone MCP server:
+
+```bash
+uv run asta-resources-mcp
+```
+
+This runs in stdio mode for MCP client integration. No authentication required (single-user model).
+
+## Development Commands
+
+### Code Quality
+
+```bash
+# Check formatting and linting
+make code-check
+
+# Auto-format code
+make code-format
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Or directly with pytest
+uv run --extra dev pytest tests/ -v
+
+# Run specific test file
+uv run --extra dev pytest tests/test_local_index_store.py -v
+
+# Run with coverage
+uv run --extra dev pytest tests/ --cov=src/asta/resources --cov-report=html
+```
+
+### Test Organization
+
+- `test_local_index_store.py`: LocalIndexDocumentStore backend tests
+- `test_mcp_tools.py`: MCP tool integration tests (if exists)
+- All tests use temporary directories (no database setup required)
 
 ## Project Workflow
 
 ### Task Tracking with Beads
 
-The project uses [Beads](https://github.com/steveyegge/beads), a distributed issue tracker designed for AI coding agents. Tasks are stored in `.beads/` and version-controlled via Git.
+The project uses [Beads](https://github.com/steveyegge/beads), a distributed issue tracker for AI coding agents.
 
 **Quick reference:**
 ```bash
-# View ready work (unblocked tasks)
+# View ready work
 bd ready
-
-# List all open issues
-bd list
 
 # Show task details
 bd show <issue-id>
@@ -79,297 +326,122 @@ bd close <issue-id> --reason "Completed"
 bd create "Task title" -d "Description" -p 1 -t feature
 ```
 
-**Project Structure:**
-- **Phase 1: Core Infrastructure** (`asta-resource-repo-khu`) - P0 - Mostly complete
-- **Phase 2: Enhanced Features** (`asta-resource-repo-tz8`) - P1 - Not started
-- **Phase 3: Production Ready** (`asta-resource-repo-0ff`) - P2 - Not started
+See `BEADS.md` for detailed workflows.
 
-See `BEADS.md` for detailed Beads usage guide and workflows.
+## Common Patterns
 
-**Legacy files:** `instructions/Progress.md` and `instructions/Roadmap.md` have been migrated to Beads. They are kept for reference but no longer actively maintained.
+### Adding New Metadata Fields
 
-## Development Commands
+To add a field to document metadata:
 
-### Code Quality
+1. Update `DocumentMetadata` in `model.py`
+2. Update `add_document` tool in `mcp_tools.py` if it should be a parameter
+3. Update CLI `add` command in `cli/index_cli.py` if needed
+4. Add tests in `tests/test_local_index_store.py`
+5. YAML format automatically handles new fields (no migration needed)
 
-```bash
-# Check code formatting and linting
-make code-check
+### Extending Search
 
-# Format the code
-make code-format
-```
+Search is implemented in `LocalIndexDocumentStore.search()`:
+- Simple in-memory string matching
+- Case-insensitive
+- Ranks by number of matches
+- To add new searchable fields, update the `search()` method
 
-### Running Tests
+### Adding New CLI Commands
 
-**Important**: Always use `uv run` to execute Python commands. Tests require specific environment variables for database access.
+1. Add command function in `cli/index_cli.py` (e.g., `cmd_export`)
+2. Add subparser in `main()` function
+3. Test manually with `uv run asta-index <command>`
 
-```bash
-# Run all tests (skips PostgreSQL tests if DB not configured)
-make test
+## Error Handling
 
-# Run tests with PostgreSQL (requires database)
-POSTGRES_URL=postgresql://asta_resources:asta_resources@localhost:15432/asta_resources uv run pytest tests/ -v
-
-# Run single test file
-uv run pytest tests/test_rest_api.py -v
-
-# Run specific test
-uv run pytest tests/test_rest_api.py::TestRestAPIUpload::test_upload_text_document -v
-```
-
-### Docker Development Workflow
-
-```bash
-# Start PostgreSQL database
-make docker-start-db
-
-# Check if PostgreSQL is ready
-make docker-check-db
-
-# Start API server (builds and runs in Docker)
-make docker-start-api
-
-# Start both database and API
-make docker-start
-
-# View logs
-make docker-logs          # All services
-make docker-logs-db       # PostgreSQL only
-make docker-logs-api      # API only
-
-# Stop all services
-make docker-stop
-
-# Restart all services
-make docker-restart
-```
-
-**Database Connection**: PostgreSQL runs on port `15432` (not default 5432) to avoid conflicts.
-
-### Running Servers Locally
-
-```bash
-# Unified server (MCP + REST)
-uv run asta-resources-server
-
-# MCP-only server (stdio mode)
-uv run asta-resources-mcp
-
-# With custom port
-uv run asta-resources-server --port 8001
-
-# Development mode (auto-reload)
-uv run asta-resources-server --reload
-```
-
-### Database Setup
-
-PostgreSQL database setup is automatic via `migrations/001_initial_schema.sql` which runs on container startup. The schema includes:
-- `documents` table: Stores document metadata and content as bytea
-- Full-text search using `to_tsvector` on content
-- Indexes on URI and search vectors
-
-Modify the `migrations/001_initial_schema.sql` file in place for schema changes, instead of adding new .sql files.
-
-## Testing Strategy
-
-### Test Organization
-
-- `test_rest_api.py`: REST API endpoint tests
-- `test_server_integration.py`: MCP server integration tests
-- `test_postgres_integration.py`: PostgreSQL backend tests (requires DB)
-- `test_docker_integration.py`: Docker deployment tests
-
-### PostgreSQL Test Requirements
-
-PostgreSQL tests are automatically skipped if `POSTGRES_URL` is not set. To run them:
-
-```bash
-# Start test database
-make docker-start-db
-
-# Run PostgreSQL tests only
-POSTGRES_URL=postgresql://asta_resources:asta_resources@localhost:15432/asta_resources uv run pytest tests/test_postgres_integration.py -v
-```
-
-Tests automatically:
-- Initialize database connection pool
-- Clean up test data after each test
-- Close connections properly in teardown
-
-## Document Handling
-
-### MIME Types
-
-Currently supported MIME types (defined in `server.py` and `mcp_server.py`):
-- `application/json`
-- `application/pdf`
-- `text/plain`
-
-Add new MIME types to `ALLOWED_MIME_TYPES` set in both server files.
-
-### Binary vs Text Documents
-
-Documents are classified based on MIME type:
-- **Text**: `text/*`, `application/json` - stored as UTF-8 strings
-- **Binary**: All others (e.g., `application/pdf`) - stored as base64 encoded strings
-
-The `DocumentMetadata.is_binary` property determines encoding/decoding logic.
-
-### Document Content Flow
-
-1. **Upload**: Content arrives as string (UTF-8 or base64) → validated → converted to `BinaryDocument` → stored in PostgreSQL as bytea
-2. **Retrieval**: Bytea from PostgreSQL → converted to `BinaryDocument` → serialized to `Document` → content returned as string
-3. **Search**: PostgreSQL full-text search on document content using `to_tsvector` and `ts_rank`
-
-## MCP Integration
-
-### Connecting from Claude Desktop
-
-Add to Claude Desktop config (`claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "asta-resources": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/user-doc-service",
-        "asta-resources-mcp"
-      ]
-    }
-  }
-}
-```
-
-### Available MCP Tools
-
-1. **`upload_document`**: Upload new document
-   - Validates MIME type and file size
-   - Returns document URI for reference
-
-2. **`get_document`**: Retrieve document by URI
-   - Returns full document with metadata and content
-
-3. **`list_documents`**: List all documents
-   - Returns metadata only (no content)
-
-4. **`search_documents`**: Full-text search
-   - Uses PostgreSQL `to_tsvector` for search
-   - Returns ranked results with snippets
-
-## Common Development Patterns
-
-### Adding a New MCP Tool
-
-1. Add tool function to `mcp_tools.py` using `@mcp.tool()` decorator
-2. Add corresponding database method to `document_store/postgres.py`
-3. If exposing via REST, add endpoint to `rest_api.py`
-4. Write integration test in `tests/test_postgres_integration.py`
-
-### Adding a New Document Field
-
-1. Update `DocumentMetadata` model in `model.py`
-2. Create database migration in `migrations/`
-3. Update `store()` and `get()` methods in `postgres.py`
-4. Update tests to verify new field
-
-### Error Handling
-
-Custom exceptions defined in `exceptions.py`:
-- `ValidationError`: Input validation failures
+Custom exceptions in `exceptions.py`:
+- `ValidationError`: Input validation failures (invalid URL, missing fields)
 - `DocumentNotFoundError`: Document doesn't exist
-- `InvalidMimeTypeError`: Unsupported MIME type
-- `DocumentTooLargeError`: Exceeds size limit
 - `DocumentServiceError`: Base exception for service errors
 
-MCP tools raise exceptions directly; REST API converts them to HTTP status codes.
-
-## Database Schema
-
-```sql
-CREATE TABLE documents (
-    id TEXT PRIMARY KEY,           -- UUID part of URI
-    uri TEXT UNIQUE NOT NULL,      -- Full asta:// URI
-    name TEXT NOT NULL,            -- Filename
-    mime_type TEXT NOT NULL,
-    content BYTEA NOT NULL,        -- Binary content
-    size_bytes BIGINT NOT NULL,
-    extra JSONB,                   -- Extra metadata as JSON
-    created_at TIMESTAMP NOT NULL,
-    modified_at TIMESTAMP,
-    search_vector TSVECTOR         -- For full-text search
-);
-```
-
-Search uses PostgreSQL full-text search with `ts_rank` for relevance scoring.
+MCP tools raise exceptions directly; CLI converts them to user-friendly messages.
 
 ## Important Notes
 
 - **Always use `uv run`**: This project uses `uv` for dependency management
-- **Port 15432**: PostgreSQL runs on non-standard port to avoid conflicts
-- **URI Format**: All document URIs must follow `asta://{namespace}/{resource_type}/{uuid}` format
-- **Environment Variable Config**: Most settings can be overridden via environment variables
-- **Async/Await**: All database operations are async using `asyncpg`
-- **Connection Pooling**: PostgreSQL uses connection pool managed by FastMCP lifespan
-- **Binary Encoding**: Binary content is stored as bytea in PostgreSQL but transmitted as base64 in API
-
-## Deployment
-
-### Docker Deployment
-
-The service is containerized with:
-- Multi-stage build using Python 3.13
-- `uv` for fast dependency installation
-- Health checks for PostgreSQL
-- Network isolation via `asta-resource-repository-network`
-
-### Environment Variables for Production
-
-```bash
-POSTGRES_URL=postgresql://user:pass@host:port/database
-POSTGRES_HOST=production-db-host
-POSTGRES_PORT=5432
-SERVER_PORT=8000
-MAX_FILE_SIZE_MB=100
-ENV=production  # Loads production.conf
-```
+- **No External Dependencies**: Zero runtime dependencies except Python stdlib + YAML parser
+- **URI Format**: All document URIs must follow `asta://{namespace}/{resource_type}/{uuid}`
+- **Single-User Model**: No authentication, designed for personal/local use
+- **Git-Friendly**: `.asta/index.yaml` is meant to be committed to version control
+- **Async/Await**: All document store operations are async for future extensibility
+- **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
 
 ## Troubleshooting
 
-### PostgreSQL Connection Issues
+### Index File Corruption
+
+If `.asta/index.yaml` becomes corrupted:
 
 ```bash
-# Check if PostgreSQL is running
-make docker-check-db
+# Backup corrupt file
+cp .asta/index.yaml .asta/index.yaml.backup
 
-# View database logs
-make docker-logs-db
-
-# Connect to database directly
-docker exec -it asta-resource-repository-db psql -U asta_resources -d asta_resources
-
-# Restart database
-docker compose restart postgres
+# Recreate empty index
+rm .asta/index.yaml
+uv run asta-index list  # Creates new empty index
 ```
-
-### Test Failures
-
-- **"Postgres not configured"**: Set `POSTGRES_URL` environment variable
-- **Connection refused**: Ensure database is running (`make docker-start-db`)
-- **Port already in use**: Check if another instance is running on port 15432 or 8000
 
 ### Import Errors
 
-If you see import errors, ensure you're in a valid uv environment:
-
 ```bash
-# Verify uv installation
-uv --version
-
 # Reinstall dependencies
 uv sync
+
+# Verify installation
+uv run python -c "from asta.resources.document_store import LocalIndexDocumentStore; print('OK')"
 ```
+
+### CLI Not Found
+
+```bash
+# Reinstall project
+uv sync
+
+# Check entry points
+uv run which asta-index
+```
+
+## Quick Start Example
+
+```bash
+# Navigate to project directory
+cd /path/to/asta-resource-repo
+
+# Add your first document
+uv run asta-index add https://arxiv.org/pdf/1706.03762.pdf \
+  --name="Attention Is All You Need" \
+  --summary="Seminal transformer architecture paper" \
+  --tags="ai,nlp,transformers"
+
+# List documents
+uv run asta-index list
+
+# Search
+uv run asta-index search "attention"
+
+# View the index file directly
+cat .asta/index.yaml
+
+# Commit to git
+git add .asta/index.yaml
+git commit -m "Add transformer paper to index"
+```
+
+## Migration from Previous Versions
+
+If migrating from PostgreSQL/REST API versions:
+
+1. **No automatic migration tool** - data must be manually re-added
+2. Previous database contents are not compatible with YAML index
+3. REST API and unified server have been removed
+4. User authentication (`ASTA_USER`) is no longer required
+5. File size limits removed (no content storage)
+
+Start with a fresh index using `asta-index add` commands.

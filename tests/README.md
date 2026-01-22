@@ -1,128 +1,56 @@
 # Test Suite Documentation
 
-This directory contains the test suite for the asta-resource-repository, including unit tests, integration tests, and PostgreSQL integration tests.
+This directory contains the test suite for asta-resource-repository, a lightweight document metadata index.
 
 ## Test Structure
 
-- `test_rest_api.py` - REST API endpoint tests (uses filesystem storage)
-- `test_server_integration.py` - MCP server integration tests (uses filesystem storage)
-- `test_postgres_integration.py` - PostgreSQL backend integration tests (requires PostgreSQL)
+### LocalIndexDocumentStore Tests
+- `test_local_index_store.py` - Complete test suite for YAML-based document metadata storage (23 tests)
+  - Document CRUD operations (create, read, update, delete)
+  - Search functionality across name, summary, tags, and extra fields
+  - Validation (URL format, required fields)
+  - Persistence across store instances
+  - Concurrent access and file locking
+  - Edge cases and error handling
 
 ## Running Tests
 
 ### Quick Start
 
-Run all tests except PostgreSQL integration tests (default):
+Run all tests:
 ```bash
 make test
 ```
 
-This will run 26 tests and skip 12 PostgreSQL tests.
-
-### Running PostgreSQL Integration Tests
-
-1. Start PostgreSQL database:
-   ```bash
-   make db-start
-   ```
-
-2. Run PostgreSQL tests only:
-   ```bash
-   make test-postgres
-   ```
-
-3. Or run all tests including PostgreSQL:
-   ```bash
-   make test-all
-   ```
-
-### Running Tests with pytest directly
-
-Run all tests (PostgreSQL tests will be skipped if database is not configured):
-```bash
-uv run pytest tests/
-```
-
-Run only PostgreSQL tests with database:
-```bash
-POSTGRES_URL=postgresql://astauser:astauser@localhost:15432/asta_resources uv run pytest tests/test_postgres_integration.py -v
-```
-
-Run with verbose output:
+Or directly with pytest:
 ```bash
 uv run pytest tests/ -v
 ```
 
+**No external dependencies required** - all tests use temporary directories and do not require databases, Docker, or external services.
+
+### Specific Test Execution
+
 Run specific test file:
 ```bash
-uv run pytest tests/test_rest_api.py -v
+uv run pytest tests/test_local_index_store.py -v
 ```
 
 Run specific test:
 ```bash
-uv run pytest tests/test_rest_api.py::TestRestAPIUpload::test_upload_text_document -v
+uv run pytest tests/test_local_index_store.py::test_store_document -v
 ```
 
-## PostgreSQL Test Configuration
-
-PostgreSQL integration tests use a configuration file for database connection settings. The tests will:
-
-1. Load configuration from `src/asta_resource_repository/config/test.conf`
-2. Override with environment variable `POSTGRES_URL` if provided
-3. Skip tests if PostgreSQL is not configured
-
-### Environment Variables
-
-- `POSTGRES_URL` - Full PostgreSQL connection URL (e.g., `postgresql://user:pass@host:port/database`)
-- `ENV` - Config environment to use (defaults to `test` for PostgreSQL tests)
-- `STORAGE_BACKEND` - Storage backend type (`local` or `postgres`)
-
-## Test Database
-
-The PostgreSQL tests use a separate test database:
-- **Database:** `test_documents` (or `asta_resources` if using docker-compose)
-- **Host:** `localhost`
-- **Port:** `15432` (when using docker-compose) or `5432` (default)
-- **User:** `astauser`
-- **Password:** `astauser`
-
-Tests automatically:
-- Create database schema on startup
-- Clean up test data after each test
-- Close database connections properly
-
-## CI/CD
-
-For CI/CD pipelines:
-
-1. Start PostgreSQL service
-2. Set `POSTGRES_URL` environment variable
-3. Run `make test-all`
-
-Example GitHub Actions:
-```yaml
-services:
-  postgres:
-    image: postgres:15
-    env:
-      POSTGRES_USER: astauser
-      POSTGRES_PASSWORD: astauser
-      POSTGRES_DB: asta_resources
-    ports:
-      - 5432:5432
-
-steps:
-  - name: Run tests
-    env:
-      POSTGRES_URL: postgresql://astauser:astauser@localhost:5432/asta_resources
-    run: make test-all
-```
-
-## Test Coverage
-
-To run tests with coverage:
+Run tests matching a pattern:
 ```bash
-uv run pytest tests/ --cov=src/asta_resource_repository --cov-report=html
+uv run pytest tests/ -k "search" -v
+```
+
+### Test Coverage
+
+Run tests with coverage:
+```bash
+uv run pytest tests/ --cov=src/asta/resources --cov-report=html
 ```
 
 View coverage report:
@@ -130,19 +58,173 @@ View coverage report:
 open htmlcov/index.html
 ```
 
+Generate coverage for specific module:
+```bash
+uv run pytest tests/test_local_index_store.py \
+  --cov=src/asta/resources/document_store/local_index \
+  --cov-report=html
+```
+
+## Test Features
+
+### LocalIndexDocumentStore Tests
+
+**CRUD Operations:**
+- Create documents with metadata
+- Retrieve documents by URI
+- Update documents by re-storing with same URI
+- Delete documents
+- Check document existence
+- List all documents
+
+**Validation:**
+- URL format validation (must start with http:// or https://)
+- Required field validation (summary, URL)
+- Namespace validation
+- URI format validation
+
+**Search:**
+- Search by document name
+- Search by summary
+- Search by tags
+- Search by extra metadata fields
+- Case-insensitive search
+- Result limiting
+- Relevance ranking
+
+**Persistence:**
+- Documents persist across store instances
+- YAML file is created automatically
+- Atomic file operations
+
+**Edge Cases:**
+- Empty index handling
+- Nonexistent document retrieval
+- Duplicate URI handling
+- Concurrent access (file locking)
+
+## Test Environment
+
+All tests use:
+- **Temporary directories**: Each test creates isolated `.asta/index.yaml` files
+- **In-memory operations**: Fast execution
+- **No cleanup required**: Temporary directories auto-delete
+- **Async fixtures**: Using `pytest-asyncio` for async test support
+
+### Test Fixtures
+
+- `temp_index_path`: Provides temporary directory for index file
+- `store`: Creates initialized LocalIndexDocumentStore instance
+
+## Development Workflow
+
+### Running Tests During Development
+
+```bash
+# Run tests on file save (requires pytest-watch)
+uv run pytest-watch tests/ -v
+
+# Run specific tests during development
+uv run pytest tests/test_local_index_store.py::test_search_by_name -v
+
+# Run with output (for debugging)
+uv run pytest tests/ -v -s
+```
+
+### Adding New Tests
+
+1. Add test function to `test_local_index_store.py`
+2. Use `@pytest.mark.asyncio` decorator for async tests
+3. Use `store` fixture for initialized document store
+4. Use `temp_index_path` fixture for custom store configuration
+5. Run tests to verify: `uv run pytest tests/test_local_index_store.py -v`
+
+Example test:
+```python
+@pytest.mark.asyncio
+async def test_my_feature(store):
+    """Test description"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test",
+        url="https://example.com/doc.pdf",
+        summary="Test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+    assert uri.startswith("asta://test-namespace/document/")
+```
+
+## CI/CD
+
+### GitHub Actions Example
+
+```yaml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ -v
+
+      - name: Check code quality
+        run: |
+          uv run black --check src/ tests/
+          uv run flake8 src/ tests/
+```
+
+**Fast execution**: Tests complete in under 1 second
+**No services required**: No PostgreSQL, Docker, or external APIs
+
 ## Troubleshooting
 
-### PostgreSQL tests are skipped
-- Make sure PostgreSQL is running: `make db-start`
-- Verify connection: `PGPASSWORD=astauser psql -h localhost -p 15432 -d asta_resources -U astauser`
-- Check `POSTGRES_URL` environment variable is set
+### Import errors
+- Ensure you're using `uv run` to execute commands
+- Verify dependencies: `uv sync`
+- Check Python version: `python --version` (should be 3.10+)
 
-### Database connection errors
-- Ensure PostgreSQL is healthy: `docker compose ps`
-- Check logs: `make logs-db`
-- Restart database: `make restart`
+### Test failures
+- Check file permissions in test directory
+- Verify temporary directory is writable
+- Run with verbose output: `uv run pytest tests/ -vv`
 
-### Tests fail with "table already exists"
-- Database schema is created automatically
-- Tests clean up after themselves
-- If needed, reset database: `make clean && make db-start`
+### Fixture errors
+- Ensure `pytest-asyncio` is installed: `uv sync --extra dev`
+- Check fixture decorators use `@pytest_asyncio.fixture`
+
+## Test Statistics
+
+- **LocalIndexDocumentStore Tests**: 23 tests
+- **Test Categories**:
+  - CRUD operations: 8 tests
+  - Validation: 4 tests
+  - Search: 7 tests
+  - Persistence: 2 tests
+  - Edge cases: 2 tests
+- **Execution time**: < 1 second
+- **Coverage**: ~95% of local_index.py
+
+## Migration from Previous Versions
+
+This test suite replaces:
+- ~~`test_postgres_integration.py`~~ (PostgreSQL backend removed)
+- ~~`test_github_unit.py`~~ (GitHub backend removed)
+- ~~`test_github_integration.py`~~ (GitHub backend removed)
+- ~~`test_rest_api.py`~~ (REST API removed)
+- ~~`test_server_integration.py`~~ (Unified server removed)
+- ~~`test_docker_integration.py`~~ (Docker removed)
+
+All database and external service dependencies have been eliminated.

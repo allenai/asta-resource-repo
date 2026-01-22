@@ -12,16 +12,11 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "fastmcp~=2.12",
-    "fastapi~=0.115",
-    "uvicorn~=0.32",
-    "asyncio-mqtt~=0.1",
-    "aiofiles~=23.0",
     "pydantic~=2.11",
-    "asyncpg~=0.29",
     "pyhocon~=0.3",
-    "click~=8.1",
     "anthropic~=0.39",
     "mcp~=1.2",
+    "pyyaml~=6.0",
 ]
 
 [project.optional-dependencies]
@@ -40,7 +35,7 @@ chatbot = [
 ]
 
 [project.scripts]
-asta-resources-server = "asta.resources.server:main"
+asta-index = "asta.resources.cli.index_cli:main"
 asta-resources-mcp = "asta.resources.mcp_server:main"
 asta-resources-chatbot = "asta.resources.cli.chatbot:main"
 

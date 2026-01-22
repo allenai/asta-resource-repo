@@ -1,5 +1,6 @@
 """Document storage interface and implementations"""
 
-from .postgres import PostgresDocumentStore
+from .base import DocumentStore
+from .local_index import LocalIndexDocumentStore
 
-__all__ = ["PostgresDocumentStore"]
+__all__ = ["DocumentStore", "LocalIndexDocumentStore"]

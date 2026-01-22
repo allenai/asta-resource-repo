@@ -10,17 +10,17 @@ from asta.resources.exceptions import ValidationError
 
 
 class DocumentMetadata(BaseModel):
-    """Document metadata"""
+    """Document metadata for local index (no content storage)"""
 
     uri: str = ""  # Full URI in format asta://{namespace}/{resource_type}/{uuid}
     name: str | None = None
     mime_type: str
-    tags: list[str] | None = None
+    url: str  # Where the content actually lives (required)
+    summary: str  # Text description for retrieval/search (required)
+    tags: list[str] = []  # Tags for categorization (required, can be empty)
     created_at: datetime | None = None
     modified_at: datetime | None = None
     extra: dict[str, Any] | None = None
-    size: int = 0
-    owner_uri: str | None = None  # User URI in format asta://{namespace}/user/{uuid}
 
     @field_serializer("created_at", "modified_at")
     def serialize_datetime(self, dt: datetime | None) -> str | None:
