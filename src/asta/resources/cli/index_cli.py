@@ -143,7 +143,11 @@ async def cmd_search(args: argparse.Namespace):
 
     try:
         async with store:
-            hits = await store.search(args.query, limit=args.limit)
+            hits = await store.search(
+                args.query,
+                limit=args.limit,
+                search_mode=args.mode if hasattr(args, "mode") else "auto",
+            )
 
             if args.json:
                 output = [hit.model_dump(mode="json") for hit in hits]
@@ -152,9 +156,23 @@ async def cmd_search(args: argparse.Namespace):
                 if not hits:
                     print(f"No matches found for: {args.query}")
                 else:
-                    print(f"Found {len(hits)} match(es) for '{args.query}':\n")
+                    # Show search mode if not auto
+                    mode_info = (
+                        f" ({args.mode} search)"
+                        if hasattr(args, "mode") and args.mode != "auto"
+                        else ""
+                    )
+                    print(
+                        f"Found {len(hits)} match(es) for '{args.query}'{mode_info}:\n"
+                    )
+
                     for hit in hits:
+                        # Show score if requested
+                        if hasattr(args, "show_scores") and args.show_scores:
+                            print(f"Score: {hit.score:.4f}")
+
                         print(format_document(hit.result, verbose=args.verbose))
+
                         if args.verbose and hit != hits[-1]:
                             print("-" * 60)
 
@@ -309,6 +327,17 @@ Examples:
         type=int,
         default=10,
         help="Maximum results (default: 10)",
+    )
+    search_parser.add_argument(
+        "--mode",
+        choices=["auto", "simple", "keyword", "semantic", "hybrid"],
+        default="auto",
+        help="Search mode: auto (default, best available), simple (substring), keyword (BM25), semantic (embeddings), hybrid (BM25+embeddings)",
+    )
+    search_parser.add_argument(
+        "--show-scores",
+        action="store_true",
+        help="Show relevance scores for each result",
     )
     search_parser.add_argument(
         "-v",

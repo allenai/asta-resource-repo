@@ -56,7 +56,9 @@ def create_mcp_server(
     )
 
     @mcp.tool()
-    async def search_documents(query: str, limit: int = 10) -> list[SearchHit]:
+    async def search_documents(
+        query: str, limit: int = 10, search_mode: str = "auto"
+    ) -> list[SearchHit]:
         """Search through documents by query
 
         Searches across document names, summaries, tags, and extra fields.
@@ -64,11 +66,17 @@ def create_mcp_server(
         Args:
             query: Search query string
             limit: Maximum number of results (default: 10)
+            search_mode: Search strategy - "auto" (default), "simple", "keyword", "semantic", or "hybrid"
+                - auto: Automatically selects the best available method
+                - simple: Basic substring matching (fastest, least accurate)
+                - keyword: BM25 keyword search (fast, good for exact matches)
+                - semantic: Embedding-based search (best for conceptual queries, requires sentence-transformers)
+                - hybrid: Combines keyword + semantic (best overall, requires sentence-transformers)
 
         Returns:
             List of search hits with document metadata ranked by relevance
         """
-        hits = await document_store.search(query, limit)
+        hits = await document_store.search(query, limit, search_mode)
         return hits
 
     @mcp.tool()

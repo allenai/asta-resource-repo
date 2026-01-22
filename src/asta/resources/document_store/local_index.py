@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 import fcntl
 import yaml
+import logging
 
 from ..model import (
     DocumentMetadata,
@@ -15,6 +16,19 @@ from ..model import (
 )
 from ..exceptions import ValidationError, DocumentServiceError
 from .base import DocumentStore
+from .search_cache import SearchCache
+from .bm25_ranker import BM25Ranker
+
+# Optional embedding imports
+try:
+    from .embeddings import EmbeddingManager, EMBEDDINGS_AVAILABLE
+    from .hybrid_search import HybridSearchRanker
+except ImportError:
+    EMBEDDINGS_AVAILABLE = False
+    EmbeddingManager = None
+    HybridSearchRanker = None
+
+logger = logging.getLogger(__name__)
 
 
 class LocalIndexDocumentStore(DocumentStore):
@@ -24,11 +38,18 @@ class LocalIndexDocumentStore(DocumentStore):
     Designed for single-user, local-only usage with zero external dependencies.
     """
 
-    def __init__(self, index_path: str = ".asta/index.yaml"):
+    def __init__(
+        self,
+        index_path: str = ".asta/index.yaml",
+        enable_cache: bool = True,
+        enable_embeddings: bool = True,
+    ):
         """Initialize the local index document store
 
         Args:
             index_path: Path to the YAML index file (default: ".asta/index.yaml")
+            enable_cache: Enable SQLite search cache for fast FTS5 search (default: True)
+            enable_embeddings: Enable semantic search with embeddings (default: True, requires sentence-transformers)
 
         Note: Namespace is automatically derived from index location
         """
@@ -36,6 +57,10 @@ class LocalIndexDocumentStore(DocumentStore):
         self.namespace: Optional[str] = None  # Set during initialize()
         self._documents: dict[str, DocumentMetadata] = {}
         self._initialized = False
+        self._enable_cache = enable_cache
+        self._enable_embeddings = enable_embeddings and EMBEDDINGS_AVAILABLE
+        self._search_cache: Optional[SearchCache] = None
+        self._embedding_manager: Optional[EmbeddingManager] = None
 
     async def initialize(self):
         """Initialize the document store by deriving namespace and loading index"""
@@ -56,12 +81,45 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Load existing index
         self._load_index()
+
+        # Initialize search cache if enabled
+        if self._enable_cache:
+            try:
+                self._search_cache = SearchCache(self.index_path)
+                self._search_cache.initialize()
+                logger.info("Search cache initialized")
+
+                # Initialize embedding manager if enabled
+                if self._enable_embeddings and EMBEDDINGS_AVAILABLE:
+                    try:
+                        self._embedding_manager = EmbeddingManager(
+                            self._search_cache.conn
+                        )
+                        logger.info("Embedding manager initialized")
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to initialize embeddings: {e}. Semantic search unavailable."
+                        )
+                        self._embedding_manager = None
+                elif self._enable_embeddings and not EMBEDDINGS_AVAILABLE:
+                    logger.info(
+                        "Embeddings disabled: sentence-transformers not installed. Install with: uv sync --extra search"
+                    )
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to initialize search cache: {e}. Falling back to simple search."
+                )
+                self._search_cache = None
+
         self._initialized = True
 
     async def close(self):
-        """Close the document store (no-op for file-based storage)"""
-        # No connections to close for file-based storage
-        pass
+        """Close the document store"""
+        # Close search cache if initialized
+        if self._search_cache:
+            self._search_cache.close()
+            self._search_cache = None
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -216,10 +274,170 @@ class LocalIndexDocumentStore(DocumentStore):
 
         return list(self._documents.values())
 
-    async def search(self, query: str, limit: int = 10) -> list[SearchHit]:
-        """Search documents by query (simple in-memory search)
+    async def search(
+        self, query: str, limit: int = 10, search_mode: str = "auto"
+    ) -> list[SearchHit]:
+        """Search documents with multiple strategies
 
-        Searches across name, summary, tags, and extra fields.
+        Searches across name, summary, tags, and extra fields using the
+        specified search mode. Auto mode selects the best available method.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+            search_mode: Search strategy - "auto", "simple", "keyword", "bm25", "semantic", or "hybrid" (default: "auto")
+
+        Returns:
+            List of search hits ranked by relevance score
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Determine search mode
+        if search_mode == "auto":
+            search_mode = self._determine_search_mode()
+
+        # Execute search based on mode with fallback logic
+        try:
+            if search_mode == "hybrid":
+                return await self._search_hybrid(query, limit)
+            elif search_mode == "semantic":
+                return await self._search_semantic(query, limit)
+            elif search_mode in ["keyword", "bm25"]:
+                return await self._search_bm25(query, limit)
+            elif search_mode == "fts5":
+                return await self._search_fts5(query, limit)
+            else:
+                return await self._search_simple(query, limit)
+        except ImportError as e:
+            logger.warning(
+                f"{search_mode} search not available: {e}. Falling back to keyword search."
+            )
+            if search_mode in ["hybrid", "semantic"]:
+                # Fallback to keyword if embeddings not available
+                return await self._search_bm25(query, limit)
+            else:
+                # Fallback to simple search
+                return await self._search_simple(query, limit)
+
+    def _determine_search_mode(self) -> str:
+        """Auto-detect best search mode based on available features
+
+        Returns:
+            Search mode string ("hybrid", "bm25", "fts5", or "simple")
+        """
+        if self._search_cache and self._search_cache._initialized:
+            # Check if embeddings are available
+            if self._embedding_manager:
+                return "hybrid"
+
+            # Check if BM25 index is available
+            try:
+                cursor = self._search_cache.conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM collection_stats")
+                if cursor.fetchone()[0] > 0:
+                    return "bm25"
+            except Exception:
+                pass
+            return "fts5"
+        return "simple"
+
+    async def _search_bm25(self, query: str, limit: int) -> list[SearchHit]:
+        """BM25-based search with TF-IDF weighting
+
+        Uses BM25 ranking algorithm for relevance scoring.
+        Provides better relevance than simple FTS5 ranking.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by BM25 score
+        """
+        # Ensure cache is synced
+        await self._search_cache.ensure_synced(self._documents)
+
+        # Create BM25 ranker
+        ranker = BM25Ranker(
+            self._search_cache.conn,
+            k1=1.2,  # TODO: Get from config
+            b=0.75,  # TODO: Get from config
+            field_weights={
+                "name": 2.0,
+                "summary": 3.0,
+                "tags": 1.5,
+                "extra": 1.0,
+            },
+        )
+
+        try:
+            # Get ranked results
+            ranked_docs = ranker.rank(query, limit)
+
+            # Convert to SearchHit objects
+            results = []
+            for uri, score in ranked_docs:
+                if uri in self._documents:
+                    results.append(SearchHit(result=self._documents[uri], score=score))
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"BM25 search failed: {e}. Falling back to FTS5.")
+            return await self._search_fts5(query, limit)
+
+    async def _search_fts5(self, query: str, limit: int) -> list[SearchHit]:
+        """FTS5-based search with field boosting
+
+        Uses SQLite FTS5 for fast indexed full-text search.
+        Field weights: summary=3, name=2, tags=1.5, extra=1
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by FTS5 BM25 score
+        """
+        # Ensure cache is synced
+        await self._search_cache.ensure_synced(self._documents)
+
+        cursor = self._search_cache.conn.cursor()
+
+        # Build FTS5 query with field boosting
+        # FTS5 uses bm25() function for ranking (negative values, lower is better)
+        # We multiply by -1 to get positive scores where higher is better
+        try:
+            cursor.execute(
+                """
+                SELECT uri, bm25(documents_fts, 2.0, 3.0, 1.5, 1.0) * -1 as score
+                FROM documents_fts
+                WHERE documents_fts MATCH ?
+                ORDER BY bm25(documents_fts, 2.0, 3.0, 1.5, 1.0)
+                LIMIT ?
+                """,
+                (query, limit),
+            )
+
+            results = []
+            for row in cursor.fetchall():
+                uri = row["uri"]
+                score = row["score"]
+                if uri in self._documents:
+                    results.append(SearchHit(result=self._documents[uri], score=score))
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"FTS5 search failed: {e}. Falling back to simple search.")
+            return await self._search_simple(query, limit)
+
+    async def _search_simple(self, query: str, limit: int = 10) -> list[SearchHit]:
+        """Simple in-memory substring search (fallback method)
+
+        Searches across name, summary, tags, and extra fields using
+        simple substring matching.
 
         Args:
             query: Search query string
@@ -228,9 +446,6 @@ class LocalIndexDocumentStore(DocumentStore):
         Returns:
             List of search hits ranked by number of matches
         """
-        if not self._initialized:
-            await self.initialize()
-
         query_lower = query.lower()
         results = []
 
@@ -262,7 +477,97 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Sort by score (descending) and limit
         results.sort(key=lambda x: x[0], reverse=True)
-        return [SearchHit(result=doc) for score, doc in results[:limit]]
+        return [
+            SearchHit(result=doc, score=float(score)) for score, doc in results[:limit]
+        ]
+
+    async def _search_semantic(self, query: str, limit: int) -> list[SearchHit]:
+        """Pure semantic search using embeddings
+
+        Uses sentence-transformers to embed the query and finds similar documents
+        using cosine similarity.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by semantic similarity
+        """
+        if not self._embedding_manager:
+            raise ImportError(
+                "Semantic search not available. Install with: uv sync --extra search"
+            )
+
+        # Ensure all documents have embeddings
+        await self._embedding_manager.ensure_embeddings(self._documents)
+
+        # Generate query embedding
+        query_embedding = self._embedding_manager.generate_embedding(query)
+
+        # Search for similar documents
+        results = self._embedding_manager.vector_search(query_embedding, limit)
+
+        # Convert to SearchHit objects
+        search_hits = []
+        for uri, score in results:
+            if uri in self._documents:
+                search_hits.append(SearchHit(result=self._documents[uri], score=score))
+
+        return search_hits
+
+    async def _search_hybrid(self, query: str, limit: int) -> list[SearchHit]:
+        """Hybrid search combining BM25 and semantic similarity
+
+        Uses Reciprocal Rank Fusion (RRF) to combine BM25 keyword search
+        and semantic similarity search for optimal results.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by hybrid score
+        """
+        if not self._embedding_manager:
+            raise ImportError(
+                "Hybrid search not available. Install with: uv sync --extra search"
+            )
+
+        # Ensure cache and embeddings ready
+        await self._search_cache.ensure_synced(self._documents)
+        await self._embedding_manager.ensure_embeddings(self._documents)
+
+        # Get BM25 results
+        bm25_ranker = BM25Ranker(
+            self._search_cache.conn,
+            k1=1.2,  # TODO: Get from config
+            b=0.75,  # TODO: Get from config
+        )
+        bm25_results = bm25_ranker.rank(query, limit * 2)  # Get more for fusion
+
+        # Get semantic results
+        query_embedding = self._embedding_manager.generate_embedding(query)
+        semantic_results = self._embedding_manager.vector_search(
+            query_embedding, limit * 2
+        )
+
+        # Combine with Reciprocal Rank Fusion
+        hybrid_ranker = HybridSearchRanker()
+        final_results = hybrid_ranker.reciprocal_rank_fusion(
+            bm25_results,
+            semantic_results,
+            bm25_weight=0.5,  # TODO: Get from config
+            semantic_weight=0.5,  # TODO: Get from config
+        )[:limit]
+
+        # Convert to SearchHit objects
+        search_hits = []
+        for uri, score in final_results:
+            if uri in self._documents:
+                search_hits.append(SearchHit(result=self._documents[uri], score=score))
+
+        return search_hits
 
     async def delete(self, uri: str) -> bool:
         """Delete a document by URI
