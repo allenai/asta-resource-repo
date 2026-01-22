@@ -22,8 +22,6 @@ def temp_index_path():
 async def store(temp_index_path):
     """Create a LocalIndexDocumentStore instance for testing"""
     store = LocalIndexDocumentStore(
-        namespace="test-namespace",
-        resource_type="document",
         index_path=str(temp_index_path),
     )
     async with store:
@@ -36,8 +34,6 @@ async def test_initialize_creates_index_file(temp_index_path):
     assert not temp_index_path.exists()
 
     store = LocalIndexDocumentStore(
-        namespace="test",
-        resource_type="document",
         index_path=str(temp_index_path),
     )
     await store.initialize()
@@ -63,7 +59,7 @@ async def test_store_document(store):
 
     uri = await store.store(doc)
 
-    assert uri.startswith("asta://test-namespace/document/")
+    assert uri.startswith("asta://")
     assert doc.created_at is not None
     assert doc.modified_at is not None
 
@@ -124,7 +120,11 @@ async def test_get_document(store):
 @pytest.mark.asyncio
 async def test_get_nonexistent_document(store):
     """Test getting a document that doesn't exist"""
-    uri = "asta://test-namespace/document/00000000-0000-0000-0000-000000000000"
+    from asta.resources.model import construct_document_uri
+
+    uri = construct_document_uri(
+        store.namespace, "00000000-0000-0000-0000-000000000000"
+    )
     result = await store.get(uri)
     assert result is None
 
@@ -132,7 +132,13 @@ async def test_get_nonexistent_document(store):
 @pytest.mark.asyncio
 async def test_get_validates_namespace(store):
     """Test that get validates namespace matches"""
-    uri = "asta://wrong-namespace/document/00000000-0000-0000-0000-000000000000"
+    from asta.resources.model import construct_document_uri
+
+    # Use a different namespace than the store's
+    wrong_namespace = "wrong-namespace-different-from-store"
+    uri = construct_document_uri(
+        wrong_namespace, "00000000-0000-0000-0000-000000000000"
+    )
     with pytest.raises(ValidationError, match="Namespace mismatch"):
         await store.get(uri)
 
@@ -307,7 +313,11 @@ async def test_delete_document(store):
 @pytest.mark.asyncio
 async def test_delete_nonexistent_document(store):
     """Test deleting a document that doesn't exist"""
-    uri = "asta://test-namespace/document/00000000-0000-0000-0000-000000000000"
+    from asta.resources.model import construct_document_uri
+
+    uri = construct_document_uri(
+        store.namespace, "00000000-0000-0000-0000-000000000000"
+    )
     deleted = await store.delete(uri)
     assert deleted is False
 
@@ -326,14 +336,23 @@ async def test_exists(store):
     uri = await store.store(doc)
     assert await store.exists(uri)
 
-    fake_uri = "asta://test-namespace/document/00000000-0000-0000-0000-000000000000"
+    from asta.resources.model import construct_document_uri
+
+    fake_uri = construct_document_uri(
+        store.namespace, "00000000-0000-0000-0000-000000000000"
+    )
     assert not await store.exists(fake_uri)
 
 
 @pytest.mark.asyncio
 async def test_exists_wrong_namespace(store):
     """Test exists with wrong namespace returns False"""
-    uri = "asta://wrong-namespace/document/00000000-0000-0000-0000-000000000000"
+    from asta.resources.model import construct_document_uri
+
+    wrong_namespace = "wrong-namespace-different-from-store"
+    uri = construct_document_uri(
+        wrong_namespace, "00000000-0000-0000-0000-000000000000"
+    )
     assert not await store.exists(uri)
 
 
@@ -342,8 +361,6 @@ async def test_persistence(temp_index_path):
     """Test that documents persist across store instances"""
     # Create and populate first store
     store1 = LocalIndexDocumentStore(
-        namespace="test",
-        resource_type="document",
         index_path=str(temp_index_path),
     )
     async with store1:
@@ -358,8 +375,6 @@ async def test_persistence(temp_index_path):
 
     # Create new store instance and verify document persists
     store2 = LocalIndexDocumentStore(
-        namespace="test",
-        resource_type="document",
         index_path=str(temp_index_path),
     )
     async with store2:

@@ -49,7 +49,7 @@ class DocumentStore(ABC):
             document: The document metadata to store (no content, only metadata)
 
         Returns:
-            The document URI in format asta://{namespace}/{resource_type}/{uuid}
+            The document URI in format asta://{namespace}/{uuid}
 
         Raises:
             ValidationError: If document metadata is invalid
@@ -62,13 +62,13 @@ class DocumentStore(ABC):
         """Retrieve document metadata by URI
 
         Args:
-            uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            uri: Document URI in format asta://{namespace}/{uuid}
 
         Returns:
             The document metadata if found, None otherwise
 
         Raises:
-            ValidationError: If URI format is invalid or namespace/resource_type doesn't match
+            ValidationError: If URI format is invalid or namespace doesn't match
             DocumentServiceError: If retrieval operation fails
         """
         pass
@@ -106,13 +106,13 @@ class DocumentStore(ABC):
         """Delete a document by URI
 
         Args:
-            uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            uri: Document URI in format asta://{namespace}/{uuid}
 
         Returns:
             True if document was deleted, False if not found
 
         Raises:
-            ValidationError: If URI format is invalid or namespace/resource_type doesn't match
+            ValidationError: If URI format is invalid or namespace doesn't match
             DocumentServiceError: If delete operation fails
         """
         pass
@@ -122,12 +122,12 @@ class DocumentStore(ABC):
         """Check if a document exists
 
         Args:
-            uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            uri: Document URI in format asta://{namespace}/{uuid}
 
         Returns:
             True if document exists, False otherwise
 
         Raises:
-            ValidationError: If URI format is invalid or namespace/resource_type doesn't match
+            ValidationError: If URI format is invalid or namespace doesn't match
         """
         pass

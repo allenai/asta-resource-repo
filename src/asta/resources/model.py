@@ -12,7 +12,7 @@ from asta.resources.exceptions import ValidationError
 class DocumentMetadata(BaseModel):
     """Document metadata for local index (no content storage)"""
 
-    uri: str = ""  # Full URI in format asta://{namespace}/{resource_type}/{uuid}
+    uri: str = ""  # Full URI in format asta://{namespace}/{uuid}
     name: str | None = None
     mime_type: str
     url: str  # Where the content actually lives (required)
@@ -100,27 +100,32 @@ class SearchResult(BaseModel):
     hits: list[SearchHit]
 
 
-def parse_document_uri(uri: str) -> tuple[str, str, str]:
-    """Parse document URI in format asta://{namespace}/{resource_type}/{uuid}
+def parse_document_uri(uri: str) -> tuple[str, str]:
+    """Parse document URI in format asta://{namespace}/{uuid}
+
+    Note: Namespace may contain slashes (e.g., owner/repo/branch)
 
     Args:
         uri: Document URI
 
     Returns:
-        Tuple of (namespace, resource_type, uuid)
+        Tuple of (namespace, uuid)
 
     Raises:
         ValidationError: If the URI format is invalid
     """
-    pattern = r"^asta://([^/]+)/([^/]+)/([a-f0-9-]+)$"
+    # Match everything between asta:// and the last UUID-like pattern
+    # The .+ will greedily match as much as possible (the namespace with slashes)
+    # Then backtrack to find the last / followed by a UUID
+    pattern = r"^asta://(.+)/([a-f0-9-]+)$"
     match = re.match(pattern, uri, re.IGNORECASE)
 
     if not match:
         raise ValidationError(
-            f"Document URI must be in format 'asta://{{namespace}}/{{resource_type}}/{{uuid}}', got: {uri}"
+            f"Document URI must be in format 'asta://{{namespace}}/{{uuid}}', got: {uri}"
         )
 
-    namespace, resource_type, uuid = match.groups()
+    namespace, uuid = match.groups()
 
     # Validate UUID format
     try:
@@ -132,15 +137,14 @@ def parse_document_uri(uri: str) -> tuple[str, str, str]:
             f"UUID part '{uuid}' is not a valid UUID."
         )
 
-    return namespace, resource_type, uuid
+    return namespace, uuid
 
 
-def construct_document_uri(namespace: str, resource_type: str, uuid: str) -> str:
-    """Construct a document URI in format asta://{namespace}/{resource_type}/{uuid}
+def construct_document_uri(namespace: str, uuid: str) -> str:
+    """Construct a document URI in format asta://{namespace}/{uuid}
 
     Args:
         namespace: Namespace identifier
-        resource_type: Resource type (e.g., "document", "user")
         uuid: UUID string
 
     Returns:
@@ -157,4 +161,4 @@ def construct_document_uri(namespace: str, resource_type: str, uuid: str) -> str
             f"Invalid UUID format: {uuid}. UUID must be a valid UUID."
         )
 
-    return f"asta://{namespace}/{resource_type}/{uuid}"
+    return f"asta://{namespace}/{uuid}"

@@ -47,9 +47,10 @@ def create_mcp_server(
     mcp = FastMCP(
         "asta-resource-repository",
         instructions=(
-            f"This MCP server provides tools for managing document metadata in a local index. "
-            f"Documents are identified by URIs of the form asta://{document_store.namespace}/{document_store.resource_type}/{{document_id}}. "
-            f"The index stores metadata (URL, summary, tags) but not document content."
+            "This MCP server provides tools for managing document metadata in a local index. "
+            "Documents are identified by URIs where the namespace is automatically derived from "
+            "the index file location (git repository info if available, file path otherwise). "
+            "The index stores metadata (URL, summary, tags) but not document content."
         ),
         lifespan=app_lifespan,
     )
@@ -75,7 +76,7 @@ def create_mcp_server(
         """Get document metadata by URI
 
         Args:
-            document_uri: Document URI in format asta://{namespace}/{resource_type}/{uuid}
+            document_uri: Document URI in format asta://{namespace}/{uuid}
 
         Returns:
             Document metadata if found, None otherwise

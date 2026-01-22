@@ -34,7 +34,7 @@ Extra: {json.dumps(doc.extra, indent=2) if doc.extra else '(none)'}
 async def cmd_list(args: argparse.Namespace):
     """List all documents"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     async with store:
         documents = await store.list_docs()
@@ -67,7 +67,7 @@ async def cmd_list(args: argparse.Namespace):
 async def cmd_add(args: argparse.Namespace):
     """Add a new document"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     # Parse tags
     tags = []
@@ -116,7 +116,7 @@ async def cmd_add(args: argparse.Namespace):
 async def cmd_get(args: argparse.Namespace):
     """Get a document by URI"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     try:
         async with store:
@@ -139,7 +139,7 @@ async def cmd_get(args: argparse.Namespace):
 async def cmd_search(args: argparse.Namespace):
     """Search documents"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     try:
         async with store:
@@ -166,7 +166,7 @@ async def cmd_search(args: argparse.Namespace):
 async def cmd_remove(args: argparse.Namespace):
     """Remove a document by URI"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     try:
         async with store:
@@ -192,7 +192,7 @@ async def cmd_remove(args: argparse.Namespace):
 async def cmd_show(args: argparse.Namespace):
     """Show index information"""
     config = load_config()
-    store = config.storage.document_store()
+    store = config.document_store()
 
     async with store:
         documents = await store.list_docs()
@@ -201,7 +201,6 @@ async def cmd_show(args: argparse.Namespace):
             info = {
                 "index_path": str(getattr(store, "index_path", "N/A")),
                 "namespace": getattr(store, "namespace", "N/A"),
-                "resource_type": getattr(store, "resource_type", "N/A"),
                 "total_documents": len(documents),
             }
             print(json.dumps(info, indent=2))
@@ -210,7 +209,6 @@ async def cmd_show(args: argparse.Namespace):
             print("=" * 60)
             print(f"Index path: {getattr(store, 'index_path', 'N/A')}")
             print(f"Namespace: {getattr(store, 'namespace', 'N/A')}")
-            print(f"Resource type: {getattr(store, 'resource_type', 'N/A')}")
             print(f"Total documents: {len(documents)}")
 
 
@@ -238,10 +236,10 @@ Examples:
   asta-index search "transformer"
 
   # Get specific document
-  asta-index get asta://local-index/document/UUID
+  asta-index get asta://owner/repo/UUID
 
   # Remove document
-  asta-index remove asta://local-index/document/UUID
+  asta-index remove asta://owner/repo/UUID
 
   # Show index information
   asta-index show
