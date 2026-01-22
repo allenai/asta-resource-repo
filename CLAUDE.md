@@ -56,29 +56,37 @@ Environment variables override config values:
 
 ## Project Workflow
 
-### Progress Tracking
+### Task Tracking with Beads
 
-The project uses `instructions/Progress.md` to track implementation status. This file should be kept **concise** - a checklist of implemented/not-implemented features, NOT a detailed changelog.
+The project uses [Beads](https://github.com/steveyegge/beads), a distributed issue tracker designed for AI coding agents. Tasks are stored in `.beads/` and version-controlled via Git.
 
-**Update progress report:**
+**Quick reference:**
 ```bash
-/update-progress
+# View ready work (unblocked tasks)
+bd ready
+
+# List all open issues
+bd list
+
+# Show task details
+bd show <issue-id>
+
+# Update task status
+bd update <issue-id> --status in_progress
+bd close <issue-id> --reason "Completed"
+
+# Create new task
+bd create "Task title" -d "Description" -p 1 -t feature
 ```
 
-This slash command provides detailed guidelines for maintaining the progress report in a concise format:
-- Checkbox list of features (what's done vs not done)
-- Organized by development phase
-- Brief descriptions (5-10 words per feature)
-- No code snippets, file paths, or detailed technical notes
-- Focus on high-level features and capabilities
+**Project Structure:**
+- **Phase 1: Core Infrastructure** (`asta-resource-repo-khu`) - P0 - Mostly complete
+- **Phase 2: Enhanced Features** (`asta-resource-repo-tz8`) - P1 - Not started
+- **Phase 3: Production Ready** (`asta-resource-repo-0ff`) - P2 - Not started
 
-**When to update Progress.md:**
-- After completing a major feature
-- After finishing a development phase
-- When starting work on a new phase
-- When asked by the user to update progress
+See `BEADS.md` for detailed Beads usage guide and workflows.
 
-See `instructions/Roadmap.md` for the long-term project goals and detailed specification.
+**Legacy files:** `instructions/Progress.md` and `instructions/Roadmap.md` have been migrated to Beads. They are kept for reference but no longer actively maintained.
 
 ## Development Commands
 
