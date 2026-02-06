@@ -1,13 +1,15 @@
 # Document Chatbot - Local Testing Tool
 
-A simple command-line chatbot for testing your MCP document server locally. This chatbot provides an interactive interface to manage documents and optionally chat with Claude about them.
+A simple command-line chatbot for testing your MCP document metadata index locally. This chatbot provides an interactive interface to manage document metadata and optionally chat with Claude about them.
 
 ## Features
 
-- 🔌 **MCP Integration**: Connects directly to your document server via stdio
-- 📚 **Document Management**: Upload, search, list, and retrieve documents
+- 🔌 **MCP Integration**: Connects directly to your MCP server via stdio
+- 📚 **Document Metadata Management**: Add, search, list, and retrieve document metadata
 - 🤖 **Claude Integration** (optional): Natural language chat with tool use
 - 💻 **Interactive CLI**: Simple command-based interface
+
+**Note**: This tool manages document **metadata only** (URLs, summaries, tags). It does not store or upload document content.
 
 ## Installation
 
@@ -37,8 +39,8 @@ Available commands:
 - `/help` - Show help message
 - `/list` - List all documents
 - `/search <query>` - Search for documents
-- `/get <uri>` - Get document details by URI
-- `/upload <path>` - Upload a document
+- `/get <uri>` - Get document metadata by URI
+- `/add <url>` - Add document metadata to index
 - `/quit` - Exit
 
 ### Advanced Usage (With Claude API)
@@ -52,11 +54,11 @@ uv run asta-chatbot
 
 Now you can chat naturally:
 ```
-💬 You: Find all PDF documents about Python
+💬 You: Find all documents about Python
 🤖 Assistant: [Claude will use the search tool and respond]
 
-💬 You: Upload my report.pdf file
-🤖 Assistant: [Claude will use the upload tool]
+💬 You: Add a document at https://example.com/report.pdf
+🤖 Assistant: [Claude will use the add_document tool]
 ```
 
 ## Example Session
@@ -67,26 +69,26 @@ Now you can chat naturally:
 ==================================================================
 🔌 Connecting to MCP server...
 ✅ Connected! Found 4 tools:
-   • search_documents: Search through user documents
-   • get_document: Get a specific document by URI
-   • list_documents: List all available documents
-   • upload_document: Upload a new document to the collection
+   • search_documents: Search documents by query
+   • get_document: Get document metadata by URI
+   • list_documents: List all documents in the index
+   • add_document: Add document metadata to the index
 
 📚 Document Chatbot Commands:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   /help              Show this help message
   /list              List all documents
   /search <query>    Search documents (e.g., /search python)
-  /get <uri>         Get document by URI
-  /upload <path>     Upload a document (e.g., /upload data/test.pdf)
+  /get <uri>         Get document metadata by URI
+  /add <url>         Add document metadata (e.g., /add https://example.com/doc.pdf)
   /quit              Exit the chatbot
 
   Or just type naturally to chat with Claude about documents!
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-💬 You: /upload data/sample.txt
-🤖 Assistant: ✅ Uploaded: sample.txt
-   URI: asta://local/abc123...
+💬 You: /add https://example.com/sample.pdf
+🤖 Assistant: ✅ Added document metadata
+   URI: asta://local-index/document/abc123...
 
 💬 You: /search python
 🤖 Assistant: 🔍 Found 2 result(s) for 'python':
@@ -104,6 +106,7 @@ Now you can chat naturally:
 2. **Tool Discovery**: Lists available tools from the MCP server
 3. **Command Processing**: Parses user commands and calls appropriate MCP tools
 4. **Claude Integration** (optional): When an API key is present, natural language input is sent to Claude with tool definitions, allowing Claude to decide which tools to call
+5. **Metadata-Only**: Manages document metadata (URLs, summaries, tags) stored in `.asta/index.yaml` without storing actual document content
 
 ## Architecture
 
@@ -125,7 +128,7 @@ Now you can chat naturally:
 ┌──────────────────────────┐
 │  MCP Server (subprocess) │
 │  - Document tools        │
-│  - Storage backend       │
+│  - YAML index backend    │
 └──────────────────────────┘
 ```
 
