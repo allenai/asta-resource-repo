@@ -26,7 +26,7 @@ def main():
 
     # Load configuration
     config = load_config()
-    document_store = config.storage.document_store()
+    document_store = config.document_store()
     allowed_mime_types = set(config.allowed_mime_types)
 
     logger.info(f"Using document store: {type(document_store).__name__}")

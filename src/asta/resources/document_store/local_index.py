@@ -24,35 +24,35 @@ class LocalIndexDocumentStore(DocumentStore):
     Designed for single-user, local-only usage with zero external dependencies.
     """
 
-    def __init__(
-        self, namespace: str, resource_type: str, index_path: str = ".asta/index.yaml"
-    ):
+    def __init__(self, index_path: str = ".asta/index.yaml"):
         """Initialize the local index document store
 
         Args:
-            namespace: Namespace identifier for URIs
-            resource_type: Resource type for documents (default: "document")
             index_path: Path to the YAML index file (default: ".asta/index.yaml")
+
+        Note: Namespace is automatically derived from index location
         """
-        self.namespace = namespace
-        self.resource_type = resource_type
         self.index_path = Path(index_path)
+        self.namespace: Optional[str] = None  # Set during initialize()
         self._documents: dict[str, DocumentMetadata] = {}
         self._initialized = False
 
     async def initialize(self):
-        """Initialize the document store by loading the index file"""
+        """Initialize the document store by deriving namespace and loading index"""
         if self._initialized:
             return
 
         # Create .asta directory if it doesn't exist
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Derive namespace from index file location
+        from ..utils.git_namespace import derive_namespace
+
+        self.namespace = derive_namespace(self.index_path)
+
         # Create empty index file if it doesn't exist
         if not self.index_path.exists():
-            self._save_index(
-                {"version": "1.0", "namespace": self.namespace, "documents": []}
-            )
+            self._save_index({"version": "1.0", "documents": []})
 
         # Load existing index
         self._load_index()
@@ -118,7 +118,6 @@ class LocalIndexDocumentStore(DocumentStore):
 
                 data = {
                     "version": "1.0",
-                    "namespace": self.namespace,
                     "documents": docs_list,
                 }
 
@@ -171,9 +170,7 @@ class LocalIndexDocumentStore(DocumentStore):
         # Generate UUID and URI if not provided
         if not document.uri:
             doc_uuid = str(uuid.uuid4())
-            document.uri = construct_document_uri(
-                self.namespace, self.resource_type, doc_uuid
-            )
+            document.uri = construct_document_uri(self.namespace, doc_uuid)
 
         # Set timestamps
         now = datetime.now(timezone.utc)
@@ -200,14 +197,10 @@ class LocalIndexDocumentStore(DocumentStore):
             await self.initialize()
 
         # Validate URI format
-        namespace, resource_type, _ = parse_document_uri(uri)
+        namespace, _ = parse_document_uri(uri)
         if namespace != self.namespace:
             raise ValidationError(
                 f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-        if resource_type != self.resource_type:
-            raise ValidationError(
-                f"Resource type mismatch: expected {self.resource_type}, got {resource_type}"
             )
 
         return self._documents.get(uri)
@@ -284,14 +277,10 @@ class LocalIndexDocumentStore(DocumentStore):
             await self.initialize()
 
         # Validate URI format
-        namespace, resource_type, _ = parse_document_uri(uri)
+        namespace, _ = parse_document_uri(uri)
         if namespace != self.namespace:
             raise ValidationError(
                 f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-        if resource_type != self.resource_type:
-            raise ValidationError(
-                f"Resource type mismatch: expected {self.resource_type}, got {resource_type}"
             )
 
         if uri in self._documents:
@@ -315,8 +304,8 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Validate URI format
         try:
-            namespace, resource_type, _ = parse_document_uri(uri)
-            if namespace != self.namespace or resource_type != self.resource_type:
+            namespace, _ = parse_document_uri(uri)
+            if namespace != self.namespace:
                 return False
         except ValidationError:
             return False

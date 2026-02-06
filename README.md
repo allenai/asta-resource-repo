@@ -127,13 +127,13 @@ uv run asta-index search "transformer architecture"
 ### Get Document Details
 
 ```bash
-uv run asta-index get asta://local-index/document/UUID
+uv run asta-index get asta://owner/repo/UUID
 ```
 
 ### Remove Document
 
 ```bash
-uv run asta-index remove asta://local-index/document/UUID
+uv run asta-index remove asta://owner/repo/UUID
 ```
 
 ### Show Index Stats
@@ -150,10 +150,9 @@ All metadata is stored in `.asta/index.yaml`:
 
 ```yaml
 version: "1.0"
-namespace: "local-index"
 
 documents:
-  - uri: "asta://local-index/document/550e8400-..."
+  - uri: "asta://allenai/asta-resource-repo/550e8400-..."
     name: "Attention Is All You Need"
     url: "https://arxiv.org/pdf/1706.03762.pdf"
     summary: "Transformer architecture paper"
@@ -164,6 +163,43 @@ documents:
       author: "Vaswani et al"
       year: 2017
 ```
+
+### Namespaces and URIs
+
+Document URIs are automatically derived from your git repository:
+
+**In a git repository:**
+- Format: `asta://{owner}/{repo}/{uuid}`
+- Example: `asta://allenai/asta-resource-repo/550e8400-...`
+- URIs are **persistent and shareable** across all team members and branches
+- URIs remain valid when merging between branches (no branch in namespace)
+
+**Outside git (or no remote configured):**
+- Format: `asta://local:{absolute_path}/{uuid}`
+- Example: `asta://local:/Users/you/project/.asta/index.yaml/550e8400-...`
+- URIs are local-only and not shareable
+
+### Git Tracking Behavior
+
+**Tracked index files** (recommended for teams):
+```bash
+# Add to git for team sharing
+git add .asta/index.yaml
+git commit -m "Add research papers to index"
+git push
+```
+
+When your team pulls the changes, they'll have:
+- ✅ Same namespace (same URIs work for everyone on all branches)
+- ✅ Same document metadata
+- ✅ Git-readable diffs when documents change
+- ✅ URIs work after merging between branches
+
+**Untracked index files** (personal use):
+- The `.gitignore` allows `.asta/index.yaml` but ignores other `.asta/` files
+- If not committed, the index is local-only to your machine
+- URIs still use git-based namespaces but aren't portable across machines
+- Useful for personal bookmarks you don't want to share
 
 ### Document Structure
 
@@ -177,7 +213,7 @@ Each document has:
 - `tags` - List of tags (can be empty)
 
 **Auto-generated:**
-- `uri` - Unique identifier (`asta://local-index/document/UUID`)
+- `uri` - Unique identifier (format: `asta://{namespace}/{uuid}`)
 - `created_at` - Creation timestamp
 - `modified_at` - Last update timestamp
 
@@ -236,26 +272,35 @@ git push
 
 ## Configuration
 
-### Environment Variables
+### Index File Location
 
-- `INDEX_PATH` - Override index file location (default: `.asta/index.yaml`)
-- `NAMESPACE` - Change URI namespace (default: `local-index`)
-- `RESOURCE_TYPE` - Change resource type (default: `document`)
+The index is always stored at `.asta/index.yaml` relative to your current directory.
 
-### Config File
-
-Edit `src/asta/resources/config/local.conf` for persistent settings.
-
-### Multiple Indexes
-
-Run multiple instances with different index files by setting `INDEX_PATH`:
-
+To use separate indexes for different projects:
 ```bash
-# Work index
-INDEX_PATH=~/work-docs/.asta/index.yaml uv run asta-index list
+# Work project
+cd ~/work-project
+uv run asta-index list
 
-# Personal index
-INDEX_PATH=~/personal/.asta/index.yaml uv run asta-index list
+# Personal project
+cd ~/personal-project
+uv run asta-index list
+```
+
+Each directory gets its own `.asta/index.yaml` file.
+
+### Allowed MIME Types
+
+Edit `src/asta/resources/config/local.conf` to customize allowed document types:
+
+```hocon
+allowed_mime_types = [
+  "application/json",
+  "application/pdf",
+  "text/plain",
+  "text/markdown",
+  "text/html"
+]
 ```
 
 ## Troubleshooting

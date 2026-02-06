@@ -67,7 +67,8 @@ out/
 *.swp
 temp/
 tmp/
-.asta/
+.asta/*
+!.asta/index.yaml
 
 # Unrelated directories
 a2a-poc/

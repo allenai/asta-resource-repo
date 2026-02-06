@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The Asta Resource Repository is a lightweight, git-friendly document metadata index that requires zero external dependencies. It provides MCP (Model Context Protocol) tools and a CLI for managing document metadata locally.
 
-**Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by URIs in the format `asta://{namespace}/{resource_type}/{uuid}`.
+**Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by URIs in the format `asta://{namespace}/{uuid}`.
 
 ## Architecture
 
@@ -65,7 +65,7 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 - `tags`: List of tags for categorization (can be empty list)
 
 **Optional fields:**
-- `uri`: Auto-generated if not provided (`asta://{namespace}/{resource_type}/{uuid}`)
+- `uri`: Auto-generated if not provided (`asta://{namespace}/{uuid}`)
 - `created_at`: Auto-set on creation
 - `modified_at`: Auto-updated on changes
 - `extra`: Dict for additional metadata (author, year, venue, etc.)
@@ -74,6 +74,7 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 - ~~`content`~~ - Never stored locally
 - ~~`size`~~ - Not relevant without content storage
 - ~~`owner_uri`~~ - Single-user model
+- ~~`resource_type`~~ - Removed from URI format for simplicity
 
 ### Index File Structure
 
@@ -81,10 +82,9 @@ The `.asta/index.yaml` file contains:
 
 ```yaml
 version: "1.0"
-namespace: "local-index"
 
 documents:
-  - uri: "asta://local-index/document/550e8400-e29b-41d4-a716-446655440000"
+  - uri: "asta://allenai/asta-resource-repo/550e8400-e29b-41d4-a716-446655440000"
     name: "Attention Is All You Need"
     url: "https://arxiv.org/pdf/1706.03762.pdf"
     summary: "Seminal paper introducing the Transformer architecture"
@@ -100,20 +100,11 @@ documents:
 
 ## Configuration
 
-Configuration uses HOCON format with environment variable overrides.
+Configuration uses HOCON format. The index file location is fixed at `.asta/index.yaml` relative to the current directory.
 
 **Default config** (`src/asta/resources/config/local.conf`):
 ```hocon
-storage {
-  backend = "local-index"
-
-  local-index {
-    namespace = "local-index"
-    index_path = ".asta/index.yaml"
-    resource_type = "document"
-  }
-}
-
+# Allowed MIME types for documents
 allowed_mime_types = [
   "application/json",
   "application/pdf",
@@ -124,11 +115,51 @@ allowed_mime_types = [
 ```
 
 **Environment variable overrides:**
-- `NAMESPACE`: Override namespace identifier
-- `RESOURCE_TYPE`: Override resource type
-- `INDEX_PATH`: Override index file path
 - `CONFIG_FILE`: Use different config file
 - `ENV`: Load environment-specific config (e.g., `production.conf`)
+
+## Namespace Derivation
+
+**Namespaces are automatically derived at runtime** from the git repository context:
+
+**In a git repository with remote:**
+- Format: `{owner}/{repo}`
+- Example: `allenai/asta-resource-repo`
+- URIs: `asta://allenai/asta-resource-repo/550e8400-...`
+- Benefit: URIs are persistent and shareable across all team members and branches
+- URIs remain valid when merging between branches
+
+**Outside git or no remote:**
+- Format: `local:{absolute_path}`
+- Example: `local:/Users/you/project/.asta/index.yaml`
+- URIs: `asta://local:/Users/you/project/.asta/index.yaml/550e8400-...`
+- Benefit: Still works without git
+
+**No branch isolation:**
+- All branches in the same repository share the same namespace
+- Feature branches and main branch use identical namespaces
+- URIs created on feature branches work after merging to main
+- This supports normal git merge workflows
+
+## Git Tracking
+
+**Recommended for teams:**
+```bash
+# Track the index file in git
+git add .asta/index.yaml
+git commit -m "Add document index"
+git push
+```
+
+When tracked in git:
+- ✅ Team members get same URIs (same namespace = same URIs)
+- ✅ Git shows readable diffs when documents change
+- ✅ Document metadata is versioned alongside code
+
+**Personal use (untracked):**
+- `.gitignore` allows tracking `.asta/index.yaml` but ignores other `.asta/` files
+- If not committed, the index is local-only
+- URIs still use git-based namespaces but aren't portable across machines
 
 ## MCP Tools
 
@@ -155,7 +186,7 @@ Retrieve document metadata by URI.
 
 ```python
 doc = await get_document(
-    document_uri="asta://local-index/document/550e8400-..."
+    document_uri="asta://allenai/asta-resource-repo/550e8400-..."
 )
 ```
 
@@ -221,10 +252,10 @@ uv run asta-index list -v
 uv run asta-index search "transformer"
 
 # Get specific document
-uv run asta-index get asta://local-index/document/UUID
+uv run asta-index get asta://owner/repo/UUID
 
 # Remove document
-uv run asta-index remove asta://local-index/document/UUID
+uv run asta-index remove asta://owner/repo/UUID
 
 # Show index information
 uv run asta-index show
@@ -367,9 +398,10 @@ MCP tools raise exceptions directly; CLI converts them to user-friendly messages
 
 - **Always use `uv run`**: This project uses `uv` for dependency management
 - **No External Dependencies**: Zero runtime dependencies except Python stdlib + YAML parser
-- **URI Format**: All document URIs must follow `asta://{namespace}/{resource_type}/{uuid}`
-- **Single-User Model**: No authentication, designed for personal/local use
-- **Git-Friendly**: `.asta/index.yaml` is meant to be committed to version control
+- **URI Format**: All document URIs follow `asta://{namespace}/{uuid}` where namespace is auto-derived from git
+- **Namespace Derivation**: Automatic from git repo (no configuration needed)
+- **Git-Friendly**: `.asta/index.yaml` should be committed for team sharing
+- **Branch Isolation**: Each git branch gets its own namespace (intentional design)
 - **Async/Await**: All document store operations are async for future extensibility
 - **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
 
@@ -436,12 +468,19 @@ git commit -m "Add transformer paper to index"
 
 ## Migration from Previous Versions
 
-If migrating from PostgreSQL/REST API versions:
+If migrating from older versions:
 
+**From PostgreSQL/REST API versions:**
 1. **No automatic migration tool** - data must be manually re-added
 2. Previous database contents are not compatible with YAML index
 3. REST API and unified server have been removed
 4. User authentication (`ASTA_USER`) is no longer required
 5. File size limits removed (no content storage)
+
+**From "local-index" namespace versions:**
+1. Namespace is now auto-derived from git (no longer configurable)
+2. Old URIs with `asta://local-index/...` won't match new git-based namespaces
+3. Index files must be recreated - URIs will change to reflect git context
+4. No migration tool provided (breaking change for simplicity)
 
 Start with a fresh index using `asta-index add` commands.
