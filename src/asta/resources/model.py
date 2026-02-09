@@ -91,6 +91,7 @@ class SearchHit(BaseModel):
     """Search result representation"""
 
     result: DocumentMetadata
+    score: float = 0.0  # Relevance score (higher is better)
 
 
 class SearchResult(BaseModel):

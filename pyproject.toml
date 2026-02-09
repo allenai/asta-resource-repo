@@ -29,6 +29,10 @@ dev = [
     "requests~=2.32",
     "mcp[cli]~=1.15",
 ]
+search = [
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.21.0",
+]
 chatbot = [
     "anthropic~=0.39",
     "mcp~=1.2",

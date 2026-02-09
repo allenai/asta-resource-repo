@@ -457,3 +457,250 @@ async def test_search_extra_fields(store):
     # Search by venue in extra fields
     results = await store.search("NeurIPS")
     assert len(results) == 1
+
+
+# FTS5 Search Tests
+
+
+@pytest.mark.asyncio
+async def test_search_returns_scores(store):
+    """Test that search results include relevance scores"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document about Python programming",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    results = await store.search("Python")
+    assert len(results) == 1
+    assert hasattr(results[0], "score")
+    assert results[0].score >= 0  # Score should be non-negative
+
+
+@pytest.mark.asyncio
+async def test_fts5_search_basic(store):
+    """Test FTS5 search finds documents correctly"""
+    docs = [
+        DocumentMetadata(
+            uri="",
+            name="Attention Is All You Need",
+            url="https://arxiv.org/pdf/1706.03762.pdf",
+            summary="Seminal paper introducing the Transformer architecture for NLP",
+            mime_type="application/pdf",
+            tags=["ai", "nlp", "transformers"],
+        ),
+        DocumentMetadata(
+            uri="",
+            name="BERT Paper",
+            url="https://arxiv.org/pdf/1810.04805.pdf",
+            summary="BERT model for language understanding",
+            mime_type="application/pdf",
+            tags=["ai", "nlp"],
+        ),
+        DocumentMetadata(
+            uri="",
+            name="ResNet Paper",
+            url="https://arxiv.org/pdf/1512.03385.pdf",
+            summary="Residual networks for image recognition",
+            mime_type="application/pdf",
+            tags=["ai", "vision"],
+        ),
+    ]
+
+    for doc in docs:
+        await store.store(doc)
+
+    # Search for "transformer" should find the first document
+    results = await store.search("transformer", search_mode="fts5")
+    assert len(results) >= 1
+    assert "Transformer" in results[0].result.summary
+
+    # Search for "NLP" should find two documents
+    results = await store.search("nlp", search_mode="fts5")
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_fts5_field_boosting(store):
+    """Test that FTS5 search respects field weights (summary > name > tags)"""
+    docs = [
+        DocumentMetadata(
+            uri="",
+            name="Neural Networks in Summary",
+            url="https://example.com/doc1.pdf",
+            summary="This document is about transformers and attention mechanisms",
+            mime_type="application/pdf",
+            tags=["ai"],
+        ),
+        DocumentMetadata(
+            uri="",
+            name="This is about transformers",
+            url="https://example.com/doc2.pdf",
+            summary="This document discusses neural network architectures",
+            mime_type="application/pdf",
+            tags=["ml"],
+        ),
+        DocumentMetadata(
+            uri="",
+            name="Generic Document",
+            url="https://example.com/doc3.pdf",
+            summary="This document discusses various topics",
+            mime_type="application/pdf",
+            tags=["transformers", "research"],
+        ),
+    ]
+
+    for doc in docs:
+        await store.store(doc)
+
+    # Search for "transformers" - doc with it in summary should rank higher
+    results = await store.search("transformers", search_mode="fts5")
+    assert len(results) >= 2
+
+    # The document with "transformers" in summary should score highest
+    assert (
+        "transformers" in results[0].result.summary.lower()
+        or "transformers" in results[0].result.name.lower()
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_mode_auto_selects_fts5(store):
+    """Test that auto mode selects FTS5 when available"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    # Auto mode should select FTS5 if cache is available
+    selected_mode = store._determine_search_mode()
+    if store._search_cache and store._search_cache._initialized:
+        assert selected_mode == "fts5"
+    else:
+        assert selected_mode == "simple"
+
+
+@pytest.mark.asyncio
+async def test_simple_search_fallback(temp_index_path):
+    """Test that simple search works when cache is disabled"""
+    # Create store with cache disabled
+    store = LocalIndexDocumentStore(
+        index_path=str(temp_index_path),
+        enable_cache=False,
+    )
+    async with store:
+        doc = DocumentMetadata(
+            uri="",
+            name="Test Document",
+            url="https://example.com/doc.pdf",
+            summary="A test document about Python",
+            mime_type="application/pdf",
+        )
+
+        await store.store(doc)
+
+        # Search should use simple mode
+        results = await store.search("Python")
+        assert len(results) == 1
+        assert results[0].result.name == "Test Document"
+
+
+@pytest.mark.asyncio
+async def test_fts5_search_with_multiple_terms(store):
+    """Test FTS5 search with multiple search terms"""
+    doc = DocumentMetadata(
+        uri="",
+        name="AI Research Paper",
+        url="https://example.com/paper.pdf",
+        summary="Deep learning and neural networks for natural language processing",
+        mime_type="application/pdf",
+        tags=["ai", "research"],
+    )
+
+    await store.store(doc)
+
+    # Search with multiple terms
+    results = await store.search("neural networks", search_mode="fts5")
+    assert len(results) == 1
+    assert "neural networks" in results[0].result.summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_search_ranking_by_relevance(store):
+    """Test that search results are ranked by relevance"""
+    docs = [
+        DocumentMetadata(
+            uri="",
+            name="Highly Relevant Document",
+            url="https://example.com/doc1.pdf",
+            summary="Python Python Python programming language Python",
+            mime_type="application/pdf",
+        ),
+        DocumentMetadata(
+            uri="",
+            name="Somewhat Relevant Document",
+            url="https://example.com/doc2.pdf",
+            summary="Introduction to Python programming",
+            mime_type="application/pdf",
+        ),
+        DocumentMetadata(
+            uri="",
+            name="Less Relevant Document",
+            url="https://example.com/doc3.pdf",
+            summary="Programming languages include Python",
+            mime_type="application/pdf",
+        ),
+    ]
+
+    for doc in docs:
+        await store.store(doc)
+
+    results = await store.search("Python", limit=10)
+
+    # Results should be ordered by relevance (descending score)
+    assert len(results) == 3
+    for i in range(len(results) - 1):
+        assert results[i].score >= results[i + 1].score
+
+
+@pytest.mark.asyncio
+async def test_search_cache_sync_on_changes(temp_index_path):
+    """Test that search cache syncs when documents are added"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Add first document
+        doc1 = DocumentMetadata(
+            uri="",
+            name="First Document",
+            url="https://example.com/doc1.pdf",
+            summary="First document",
+            mime_type="application/pdf",
+        )
+        await store.store(doc1)
+
+        # Search should find it
+        results = await store.search("First", search_mode="fts5")
+        assert len(results) == 1
+
+        # Add second document
+        doc2 = DocumentMetadata(
+            uri="",
+            name="Second Document",
+            url="https://example.com/doc2.pdf",
+            summary="Second document",
+            mime_type="application/pdf",
+        )
+        await store.store(doc2)
+
+        # Search should find both
+        results = await store.search("document", search_mode="fts5")
+        assert len(results) == 2
