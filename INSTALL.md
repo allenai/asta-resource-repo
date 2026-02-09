@@ -73,13 +73,9 @@ uv run asta-index add https://example.com/doc.pdf \
 
 ### Configure for Claude Desktop
 
-**macOS**: Edit `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Note**: MCP integration for Claude Desktop is deprecated. The skill approach is only available for Claude Code.
 
-**Windows**: Edit `%APPDATA%\Claude\claude_desktop_config.json`
-
-**Linux**: Edit `~/.config/Claude/claude_desktop_config.json`
-
-Add the same configuration as above, then restart Claude Desktop.
+For Claude Desktop MCP setup (deprecated), see [MCP_SETUP.md](MCP_SETUP.md).
 
 ## Manual Installation
 

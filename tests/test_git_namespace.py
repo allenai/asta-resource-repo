@@ -77,7 +77,9 @@ class TestDeriveNamespace:
             ),  # get_remote_url
         ]
 
-        namespace = derive_namespace(Path("/Users/test/repo/.asta/index.yaml"))
+        namespace = derive_namespace(
+            Path("/Users/test/repo/.asta/documents/index.yaml")
+        )
         assert namespace == "owner/repo"
 
     @patch("asta.resources.utils.git_namespace.subprocess.run")
@@ -91,7 +93,9 @@ class TestDeriveNamespace:
             ),  # get_remote_url
         ]
 
-        namespace = derive_namespace(Path("/Users/test/repo/.asta/index.yaml"))
+        namespace = derive_namespace(
+            Path("/Users/test/repo/.asta/documents/index.yaml")
+        )
         assert namespace == "company/project"
 
     @patch("asta.resources.utils.git_namespace.subprocess.run")
@@ -100,7 +104,9 @@ class TestDeriveNamespace:
         # Mock git command failure (not in git repo)
         mock_run.return_value = MagicMock(returncode=128)
 
-        namespace = derive_namespace(Path("/Users/test/project/.asta/index.yaml"))
+        namespace = derive_namespace(
+            Path("/Users/test/project/.asta/documents/index.yaml")
+        )
         assert namespace.startswith("local:")
         assert "index.yaml" in namespace
 
@@ -113,7 +119,7 @@ class TestDeriveNamespace:
             MagicMock(returncode=1, stdout=""),  # get_remote_url fails
         ]
 
-        namespace = derive_namespace(Path("/tmp/.asta/index.yaml"))
+        namespace = derive_namespace(Path("/tmp/.asta/documents/index.yaml"))
         assert namespace.startswith("local:")
 
     @patch("asta.resources.utils.git_namespace.subprocess.run")
@@ -127,7 +133,7 @@ class TestDeriveNamespace:
             ),  # get_remote_url
         ]
 
-        namespace = derive_namespace(Path("/tmp/.asta/index.yaml"))
+        namespace = derive_namespace(Path("/tmp/.asta/documents/index.yaml"))
         assert namespace == "owner/repo"
 
     @patch("asta.resources.utils.git_namespace.subprocess.run")
@@ -140,7 +146,7 @@ class TestDeriveNamespace:
             MagicMock(returncode=0, stdout="main\n"),  # get_current_branch
         ]
 
-        namespace = derive_namespace(Path("/tmp/.asta/index.yaml"))
+        namespace = derive_namespace(Path("/tmp/.asta/documents/index.yaml"))
         assert namespace.startswith("local:")
 
 

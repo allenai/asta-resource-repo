@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "asta-resource-repository"
 version = "0.1.0"
-description = "MCP server for Asta resource management"
+description = "Lightweight document metadata index with CLI and skill support"
 authors = [{name = "Asta Resource Repository Team"}]
 license = {text = "MIT"}
 readme = "README.md"
@@ -40,7 +40,6 @@ chatbot = [
 
 [project.scripts]
 asta-index = "asta.resources.cli.index_cli:main"
-asta-resources-mcp = "asta.resources.mcp_server:main"
 asta-resources-chatbot = "asta.resources.cli.chatbot:main"
 
 [project.urls]

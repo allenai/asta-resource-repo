@@ -48,9 +48,11 @@ def create_mcp_server(
         "asta-resource-repository",
         instructions=(
             "This MCP server provides tools for managing document metadata in a local index. "
-            "Documents are identified by URIs where the namespace is automatically derived from "
-            "the index file location (git repository info if available, file path otherwise). "
-            "The index stores metadata (URL, summary, tags) but not document content."
+            "The stored documents are external URIs (e.g., http://) that point to the actual content, "
+            "plus a set of user-provided tags and a plain-text description. "
+            'Use this tool when the user asks "Asta" to store or retrieve a document. '
+            'Use this tool when the users wants to store a document in the "Asta repository", or "in Asta". '
+            "Use this tool when the user asks to retrieve an asta:// URI. "
         ),
         lifespan=app_lifespan,
     )
@@ -167,5 +169,132 @@ def create_mcp_server(
         # Store and get generated URI
         doc_metadata.uri = await document_store.store(doc_metadata)
         return doc_metadata
+
+    @mcp.tool()
+    async def update_document(
+        document_uri: str,
+        name: str | None = None,
+        url: str | None = None,
+        summary: str | None = None,
+        mime_type: str | None = None,
+        tags: list[str] | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> DocumentMetadata:
+        """Update document metadata
+
+        Updates one or more fields of an existing document. Only provided fields will be updated.
+
+        Args:
+            document_uri: Document URI in format asta://{namespace}/{uuid}
+            name: New document name (optional)
+            url: New document URL (optional, must start with http:// or https://)
+            summary: New text description (optional)
+            mime_type: New MIME type (optional)
+            tags: New list of tags (optional, replaces existing tags)
+            extra_metadata: New extra metadata (optional, replaces existing extra)
+
+        Returns:
+            Updated document metadata
+
+        Raises:
+            ValidationError: If document not found or update values are invalid
+        """
+        # Validate MIME type if provided
+        if mime_type is not None and mime_type not in allowed_mime_types:
+            raise ValidationError(
+                f"Unsupported MIME type '{mime_type}'. "
+                f"Allowed types: {', '.join(sorted(allowed_mime_types))}"
+            )
+
+        # Update document
+        updated_doc = await document_store.update(
+            uri=document_uri,
+            name=name,
+            url=url,
+            summary=summary,
+            mime_type=mime_type,
+            tags=tags,
+            extra=extra_metadata,
+        )
+
+        return updated_doc
+
+    @mcp.tool()
+    async def add_tags_to_document(
+        document_uri: str, tags: list[str]
+    ) -> DocumentMetadata:
+        """Add tags to a document without replacing existing tags
+
+        Adds new tags to a document while preserving existing tags.
+        Duplicate tags are automatically removed.
+
+        Args:
+            document_uri: Document URI in format asta://{namespace}/{uuid}
+            tags: List of tags to add to the document
+
+        Returns:
+            Updated document metadata with combined tags
+
+        Raises:
+            ValidationError: If document not found or tags are invalid
+        """
+        if not tags:
+            raise ValidationError("At least one tag must be provided")
+
+        updated_doc = await document_store.add_tags(document_uri, tags)
+        return updated_doc
+
+    @mcp.tool()
+    async def remove_tags_from_document(
+        document_uri: str, tags: list[str]
+    ) -> DocumentMetadata:
+        """Remove specific tags from a document
+
+        Removes specified tags from a document. Tags that don't exist
+        on the document are silently ignored.
+
+        Args:
+            document_uri: Document URI in format asta://{namespace}/{uuid}
+            tags: List of tags to remove from the document
+
+        Returns:
+            Updated document metadata with tags removed
+
+        Raises:
+            ValidationError: If document not found
+        """
+        if not tags:
+            raise ValidationError("At least one tag must be provided")
+
+        updated_doc = await document_store.remove_tags(document_uri, tags)
+        return updated_doc
+
+    @mcp.tool()
+    async def get_documents_by_tags(
+        tags: list[str], match_all: bool = False
+    ) -> list[DocumentMetadata]:
+        """Get documents that have specific tags
+
+        Retrieves all documents that match the specified tag criteria.
+
+        Args:
+            tags: List of tags to filter by
+            match_all: If True, require all tags; if False, require any tag (default: False)
+
+        Returns:
+            List of documents matching the tag criteria
+
+        Examples:
+            # Get documents with either "ai" or "ml" tags
+            get_documents_by_tags(["ai", "ml"], match_all=False)
+
+            # Get documents that have both "ai" AND "research" tags
+            get_documents_by_tags(["ai", "research"], match_all=True)
+        """
+        if not tags:
+            raise ValidationError("At least one tag must be provided")
+
+        documents = await document_store.get_documents_by_tags(tags, match_all)
+        return documents
 
     return mcp

@@ -5,8 +5,13 @@ Command-line interface for managing the local document metadata index.
 
 import argparse
 import asyncio
+import hashlib
 import json
+import subprocess
 import sys
+import yaml
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 from ..config import load_config
 from ..model import DocumentMetadata
@@ -181,6 +186,57 @@ async def cmd_search(args: argparse.Namespace):
         sys.exit(1)
 
 
+async def cmd_update(args: argparse.Namespace):
+    """Update a document's metadata"""
+    config = load_config()
+    store = config.document_store()
+
+    # Parse tags if provided
+    tags = None
+    if args.tags:
+        tags = [tag.strip() for tag in args.tags.split(",")]
+
+    # Parse extra metadata if provided
+    extra = None
+    if args.extra:
+        try:
+            extra = json.loads(args.extra)
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON in --extra: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    try:
+        async with store:
+            # Update document
+            updated_doc = await store.update(
+                uri=args.uri,
+                name=args.name,
+                url=args.url,
+                summary=args.summary,
+                mime_type=args.mime_type,
+                tags=tags,
+                extra=extra,
+            )
+
+            if args.json:
+                print(
+                    json.dumps(
+                        updated_doc.model_dump(mode="json"), indent=2, default=str
+                    )
+                )
+            else:
+                print(f"✓ Document updated: {args.uri}")
+                print(f"  Name: {updated_doc.name}")
+                print(f"  URL: {updated_doc.url}")
+                if updated_doc.tags:
+                    print(f"  Tags: {', '.join(updated_doc.tags)}")
+                print(f"  Modified: {updated_doc.modified_at.isoformat()}")
+
+    except (ValidationError, DocumentServiceError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 async def cmd_remove(args: argparse.Namespace):
     """Remove a document by URI"""
     config = load_config()
@@ -201,6 +257,116 @@ async def cmd_remove(args: argparse.Namespace):
                 else:
                     print(f"Document not found: {args.uri}", file=sys.stderr)
                     sys.exit(1)
+
+    except (ValidationError, DocumentServiceError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+async def cmd_add_tags(args: argparse.Namespace):
+    """Add tags to a document"""
+    config = load_config()
+    store = config.document_store()
+
+    # Parse tags
+    if not args.tags:
+        print("Error: --tags is required", file=sys.stderr)
+        sys.exit(1)
+
+    tags = [tag.strip() for tag in args.tags.split(",")]
+
+    try:
+        async with store:
+            updated_doc = await store.add_tags(args.uri, tags)
+
+            if args.json:
+                print(
+                    json.dumps(
+                        updated_doc.model_dump(mode="json"), indent=2, default=str
+                    )
+                )
+            else:
+                print(f"✓ Tags added to document: {args.uri}")
+                print(f"  Added: {', '.join(tags)}")
+                print(f"  Current tags: {', '.join(updated_doc.tags)}")
+                print(f"  Modified: {updated_doc.modified_at.isoformat()}")
+
+    except (ValidationError, DocumentServiceError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+async def cmd_remove_tags(args: argparse.Namespace):
+    """Remove tags from a document"""
+    config = load_config()
+    store = config.document_store()
+
+    # Parse tags
+    if not args.tags:
+        print("Error: --tags is required", file=sys.stderr)
+        sys.exit(1)
+
+    tags = [tag.strip() for tag in args.tags.split(",")]
+
+    try:
+        async with store:
+            updated_doc = await store.remove_tags(args.uri, tags)
+
+            if args.json:
+                print(
+                    json.dumps(
+                        updated_doc.model_dump(mode="json"), indent=2, default=str
+                    )
+                )
+            else:
+                print(f"✓ Tags removed from document: {args.uri}")
+                print(f"  Removed: {', '.join(tags)}")
+                print(
+                    f"  Current tags: {', '.join(updated_doc.tags) if updated_doc.tags else '(none)'}"
+                )
+                print(f"  Modified: {updated_doc.modified_at.isoformat()}")
+
+    except (ValidationError, DocumentServiceError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+async def cmd_list_by_tags(args: argparse.Namespace):
+    """List documents by tags"""
+    config = load_config()
+    store = config.document_store()
+
+    # Parse tags
+    if not args.tags:
+        print("Error: --tags is required", file=sys.stderr)
+        sys.exit(1)
+
+    tags = [tag.strip() for tag in args.tags.split(",")]
+
+    try:
+        async with store:
+            documents = await store.get_documents_by_tags(
+                tags, match_all=args.match_all
+            )
+
+            if args.json:
+                output = [doc.model_dump(mode="json") for doc in documents]
+                print(json.dumps(output, indent=2, default=str))
+            else:
+                if not documents:
+                    match_type = "all" if args.match_all else "any"
+                    print(
+                        f"No documents found with {match_type} of tags: {', '.join(tags)}"
+                    )
+                else:
+                    match_type = "all" if args.match_all else "any"
+                    print(
+                        f"Found {len(documents)} document(s) with {match_type} of tags [{', '.join(tags)}]:\n"
+                    )
+                    for doc in documents:
+                        print(format_document(doc, verbose=args.verbose))
+                        if args.verbose and doc != documents[-1]:
+                            print("-" * 60)
 
     except (ValidationError, DocumentServiceError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -230,6 +396,401 @@ async def cmd_show(args: argparse.Namespace):
             print(f"Total documents: {len(documents)}")
 
 
+# ============================================================================
+# Cache Management Functions
+# ============================================================================
+
+
+def get_cache_dir() -> Path:
+    """Get the cache directory path."""
+    return Path(".asta/cache")
+
+
+def compute_url_hash(url: str) -> str:
+    """Compute SHA256 hash of URL for cache key."""
+    return hashlib.sha256(url.encode()).hexdigest()
+
+
+def parse_cache_date(date_str: str) -> datetime:
+    """Parse ISO 8601 date string from cache metadata."""
+    if date_str.endswith("Z"):
+        return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+    return datetime.fromisoformat(date_str)
+
+
+def format_size(size_bytes: int) -> str:
+    """Format byte size as human-readable string."""
+    for unit in ["B", "KB", "MB", "GB"]:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} TB"
+
+
+async def cmd_cache_list(args: argparse.Namespace):
+    """List all items in the cache."""
+    cache_dir = get_cache_dir()
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return
+
+    items = []
+    for item_dir in cache_dir.iterdir():
+        if not item_dir.is_dir():
+            continue
+
+        metadata_file = item_dir / "metadata.yaml"
+        content_file = item_dir / "content"
+
+        if not metadata_file.exists():
+            continue
+
+        with open(metadata_file, "r") as f:
+            metadata = yaml.safe_load(f)
+
+        content_size = content_file.stat().st_size if content_file.exists() else 0
+        fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
+        age_days = (datetime.now(timezone.utc) - fetch_date).days
+
+        items.append(
+            {
+                "hash": item_dir.name,
+                "url": metadata.get("url", "Unknown"),
+                "content_type": metadata.get("content_type", "Unknown"),
+                "fetch_date": fetch_date,
+                "age_days": age_days,
+                "size_bytes": content_size,
+                "document_uri": metadata.get("document_uri", "N/A"),
+            }
+        )
+
+    if not items:
+        print("Cache is empty.")
+        return
+
+    if args.json:
+        print(json.dumps(items, indent=2, default=str))
+        return
+
+    # Sort by fetch date (newest first)
+    items.sort(key=lambda x: x["fetch_date"], reverse=True)
+
+    print(f"{'Hash':<16} {'Age (days)':<12} {'Size':<12} {'URL':<50}")
+    print("-" * 100)
+
+    for item in items:
+        size_str = format_size(item["size_bytes"])
+        url_short = item["url"][:47] + "..." if len(item["url"]) > 50 else item["url"]
+        print(
+            f"{item['hash'][:16]:<16} {item['age_days']:<12} {size_str:<12} {url_short:<50}"
+        )
+
+    total_size = sum(item["size_bytes"] for item in items)
+    print(f"\nTotal: {len(items)} items, {format_size(total_size)}")
+
+
+async def cmd_cache_stats(args: argparse.Namespace):
+    """Show cache statistics."""
+    cache_dir = get_cache_dir()
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return
+
+    total_items = 0
+    total_size = 0
+    content_types = {}
+    age_buckets = {
+        "0-1 days": 0,
+        "1-3 days": 0,
+        "3-7 days": 0,
+        "7-14 days": 0,
+        "14-30 days": 0,
+        "30+ days": 0,
+    }
+
+    for item_dir in cache_dir.iterdir():
+        if not item_dir.is_dir():
+            continue
+
+        metadata_file = item_dir / "metadata.yaml"
+        content_file = item_dir / "content"
+
+        if not metadata_file.exists():
+            continue
+
+        total_items += 1
+
+        with open(metadata_file, "r") as f:
+            metadata = yaml.safe_load(f)
+
+        if content_file.exists():
+            total_size += content_file.stat().st_size
+
+        content_type = metadata.get("content_type", "Unknown")
+        content_types[content_type] = content_types.get(content_type, 0) + 1
+
+        fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
+        age_days = (datetime.now(timezone.utc) - fetch_date).days
+
+        if age_days <= 1:
+            age_buckets["0-1 days"] += 1
+        elif age_days <= 3:
+            age_buckets["1-3 days"] += 1
+        elif age_days <= 7:
+            age_buckets["3-7 days"] += 1
+        elif age_days <= 14:
+            age_buckets["7-14 days"] += 1
+        elif age_days <= 30:
+            age_buckets["14-30 days"] += 1
+        else:
+            age_buckets["30+ days"] += 1
+
+    if args.json:
+        output = {
+            "total_items": total_items,
+            "total_size_bytes": total_size,
+            "total_size": format_size(total_size),
+            "content_types": content_types,
+            "age_distribution": age_buckets,
+        }
+        print(json.dumps(output, indent=2))
+        return
+
+    print("Cache Statistics")
+    print("=" * 50)
+    print(f"Total items: {total_items}")
+    print(f"Total size: {format_size(total_size)}")
+    print()
+
+    print("Content Types:")
+    for content_type, count in sorted(content_types.items()):
+        print(f"  {content_type}: {count}")
+    print()
+
+    print("Age Distribution:")
+    for bucket, count in age_buckets.items():
+        print(f"  {bucket}: {count}")
+
+
+async def cmd_cache_clean(args: argparse.Namespace):
+    """Remove cache items older than max_age_days."""
+    cache_dir = get_cache_dir()
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return
+
+    removed_count = 0
+    removed_size = 0
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=args.days)
+
+    for item_dir in cache_dir.iterdir():
+        if not item_dir.is_dir():
+            continue
+
+        metadata_file = item_dir / "metadata.yaml"
+        content_file = item_dir / "content"
+
+        if not metadata_file.exists():
+            continue
+
+        with open(metadata_file, "r") as f:
+            metadata = yaml.safe_load(f)
+
+        fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
+
+        if fetch_date < cutoff_date:
+            size = content_file.stat().st_size if content_file.exists() else 0
+            url = metadata.get("url", "Unknown")
+
+            if not args.quiet:
+                prefix = "[DRY RUN] " if args.dry_run else ""
+                url_short = url[:50] + "..." if len(url) > 50 else url
+                print(f"{prefix}Removing: {item_dir.name} ({url_short})")
+
+            if not args.dry_run:
+                import shutil
+
+                shutil.rmtree(item_dir)
+
+            removed_count += 1
+            removed_size += size
+
+    action = "Would remove" if args.dry_run else "Removed"
+    print(f"\n{action} {removed_count} items, {format_size(removed_size)}")
+
+
+async def cmd_cache_clear(args: argparse.Namespace):
+    """Remove all cache items."""
+    cache_dir = get_cache_dir()
+
+    if not cache_dir.exists():
+        print("Cache directory does not exist.")
+        return
+
+    if not args.yes:
+        response = input("Are you sure you want to clear the entire cache? [y/N]: ")
+        if response.lower() != "y":
+            print("Cancelled.")
+            return
+
+    import shutil
+
+    shutil.rmtree(cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    print("Cache cleared.")
+
+
+async def cmd_cache_info(args: argparse.Namespace):
+    """Show detailed information for a specific cached item."""
+    cache_dir = get_cache_dir() / args.hash
+
+    if not cache_dir.exists():
+        print(f"Cache item not found: {args.hash}", file=sys.stderr)
+        sys.exit(1)
+
+    metadata_file = cache_dir / "metadata.yaml"
+    content_file = cache_dir / "content"
+
+    if not metadata_file.exists():
+        print(f"Metadata file not found for: {args.hash}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(metadata_file, "r") as f:
+        metadata = yaml.safe_load(f)
+
+    fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
+    age_days = (datetime.now(timezone.utc) - fetch_date).days
+
+    if args.json:
+        output = {
+            "hash": args.hash,
+            "url": metadata.get("url", "Unknown"),
+            "document_uri": metadata.get("document_uri", "N/A"),
+            "content_type": metadata.get("content_type", "Unknown"),
+            "fetch_date": metadata.get("fetch_date", "Unknown"),
+            "age_days": age_days,
+            "is_stale": age_days > 7,
+        }
+        if content_file.exists():
+            output["file_size"] = content_file.stat().st_size
+            output["file_size_formatted"] = format_size(content_file.stat().st_size)
+            output["content_path"] = str(content_file)
+        print(json.dumps(output, indent=2))
+        return
+
+    print("Cache Item Details")
+    print("=" * 70)
+    print(f"Hash: {args.hash}")
+    print(f"URL: {metadata.get('url', 'Unknown')}")
+    print(f"Document URI: {metadata.get('document_uri', 'N/A')}")
+    print(f"Content Type: {metadata.get('content_type', 'Unknown')}")
+    print(f"Fetch Date: {metadata.get('fetch_date', 'Unknown')}")
+
+    if "extraction_method" in metadata:
+        print(f"Extraction Method: {metadata['extraction_method']}")
+
+    if content_file.exists():
+        size = content_file.stat().st_size
+        print(f"File Size: {format_size(size)}")
+        print(f"Content Path: {content_file}")
+    else:
+        print("Content file not found")
+
+    print(f"Age: {age_days} days")
+
+    if age_days > 7:
+        print("⚠️  Cache is stale (> 7 days old)")
+
+
+async def cmd_fetch(args: argparse.Namespace):
+    """Fetch content from URL with caching."""
+    # Get document metadata
+    config = load_config()
+    store = config.document_store()
+
+    async with store:
+        doc = await store.get(args.uri)
+
+        if doc is None:
+            print(f"Error: Document not found: {args.uri}", file=sys.stderr)
+            sys.exit(1)
+
+        url = doc.url
+        mime_type = doc.mime_type
+
+        # Check cache
+        url_hash = compute_url_hash(url)
+        cache_dir = get_cache_dir() / url_hash
+        content_file = cache_dir / "content"
+        metadata_file = cache_dir / "metadata.yaml"
+
+        use_cache = False
+        if content_file.exists() and metadata_file.exists() and not args.force:
+            with open(metadata_file, "r") as f:
+                cache_metadata = yaml.safe_load(f)
+            fetch_date = parse_cache_date(cache_metadata.get("fetch_date", ""))
+            age_days = (datetime.now(timezone.utc) - fetch_date).days
+
+            if age_days < args.max_age:
+                use_cache = True
+                if not args.quiet:
+                    print(
+                        f"Using cached content (age: {age_days} days)", file=sys.stderr
+                    )
+
+        if use_cache:
+            # Read from cache
+            with open(content_file, "rb") as f:
+                content = f.read()
+        else:
+            # Fetch from URL
+            if not args.quiet:
+                print(f"Fetching: {url}", file=sys.stderr)
+
+            try:
+                result = subprocess.run(
+                    ["curl", "-L", "-f", "-s", url], capture_output=True, check=True
+                )
+                content = result.stdout
+
+                # Save to cache
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                with open(content_file, "wb") as f:
+                    f.write(content)
+
+                cache_metadata = {
+                    "url": url,
+                    "fetch_date": datetime.now(timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "content_type": mime_type,
+                    "document_uri": args.uri,
+                    "file_size": len(content),
+                }
+                with open(metadata_file, "w") as f:
+                    yaml.dump(cache_metadata, f)
+
+                if not args.quiet:
+                    print(f"Cached at: {content_file}", file=sys.stderr)
+
+            except subprocess.CalledProcessError as e:
+                print(f"Error fetching content: {e}", file=sys.stderr)
+                sys.exit(1)
+
+        # Output
+        if args.output:
+            with open(args.output, "wb") as f:
+                f.write(content)
+            if not args.quiet:
+                print(f"Saved to: {args.output}", file=sys.stderr)
+        else:
+            sys.stdout.buffer.write(content)
+
+
 def main():
     """Main entry point for asta-index CLI"""
     parser = argparse.ArgumentParser(
@@ -256,11 +817,38 @@ Examples:
   # Get specific document
   asta-index get asta://owner/repo/UUID
 
+  # Update document metadata
+  asta-index update asta://owner/repo/UUID \\
+    --name="New Title" \\
+    --tags="ai,updated"
+
   # Remove document
   asta-index remove asta://owner/repo/UUID
 
+  # Add tags to a document
+  asta-index add-tags asta://owner/repo/UUID --tags="ai,updated"
+
+  # Remove tags from a document
+  asta-index remove-tags asta://owner/repo/UUID --tags="old,deprecated"
+
+  # List documents by tags (any tag matches)
+  asta-index list-by-tags --tags="ai,ml"
+
+  # List documents by tags (all tags must match)
+  asta-index list-by-tags --tags="ai,research" --match-all
+
   # Show index information
   asta-index show
+
+  # Fetch document content (with caching)
+  asta-index fetch asta://owner/repo/UUID -o document.pdf
+
+  # Cache management
+  asta-index cache list            # List cached items
+  asta-index cache stats           # Show statistics
+  asta-index cache clean --days 7  # Remove old items
+  asta-index cache clear           # Remove all cache
+  asta-index cache info <hash>     # Show item details
 """,
     )
 
@@ -347,14 +935,137 @@ Examples:
     )
     search_parser.set_defaults(func=cmd_search)
 
+    # update command
+    update_parser = subparsers.add_parser("update", help="Update document metadata")
+    update_parser.add_argument("uri", help="Document URI to update")
+    update_parser.add_argument("--name", help="New document name")
+    update_parser.add_argument("--url", help="New document URL")
+    update_parser.add_argument("--summary", help="New document summary")
+    update_parser.add_argument("--mime-type", help="New MIME type")
+    update_parser.add_argument(
+        "--tags", help="New tags (comma-separated, replaces existing)"
+    )
+    update_parser.add_argument(
+        "--extra", help="New extra metadata as JSON string (replaces existing)"
+    )
+    update_parser.set_defaults(func=cmd_update)
+
     # remove command
     remove_parser = subparsers.add_parser("remove", help="Remove document by URI")
     remove_parser.add_argument("uri", help="Document URI to remove")
     remove_parser.set_defaults(func=cmd_remove)
 
+    # add-tags command
+    add_tags_parser = subparsers.add_parser("add-tags", help="Add tags to a document")
+    add_tags_parser.add_argument("uri", help="Document URI")
+    add_tags_parser.add_argument(
+        "--tags", required=True, help="Tags to add (comma-separated)"
+    )
+    add_tags_parser.set_defaults(func=cmd_add_tags)
+
+    # remove-tags command
+    remove_tags_parser = subparsers.add_parser(
+        "remove-tags", help="Remove tags from a document"
+    )
+    remove_tags_parser.add_argument("uri", help="Document URI")
+    remove_tags_parser.add_argument(
+        "--tags", required=True, help="Tags to remove (comma-separated)"
+    )
+    remove_tags_parser.set_defaults(func=cmd_remove_tags)
+
+    # list-by-tags command
+    list_by_tags_parser = subparsers.add_parser(
+        "list-by-tags", help="List documents by tags"
+    )
+    list_by_tags_parser.add_argument(
+        "--tags", required=True, help="Tags to filter by (comma-separated)"
+    )
+    list_by_tags_parser.add_argument(
+        "--match-all",
+        action="store_true",
+        help="Require all tags (default: any tag)",
+    )
+    list_by_tags_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show detailed information",
+    )
+    list_by_tags_parser.set_defaults(func=cmd_list_by_tags)
+
     # show command
     show_parser = subparsers.add_parser("show", help="Show index information")
     show_parser.set_defaults(func=cmd_show)
+
+    # fetch command
+    fetch_parser = subparsers.add_parser(
+        "fetch", help="Fetch document content with caching"
+    )
+    fetch_parser.add_argument("uri", help="Document URI (asta://...)")
+    fetch_parser.add_argument("-o", "--output", help="Output file (default: stdout)")
+    fetch_parser.add_argument(
+        "--force", action="store_true", help="Force refresh, ignore cache"
+    )
+    fetch_parser.add_argument(
+        "--max-age",
+        type=int,
+        default=7,
+        help="Maximum cache age in days (default: 7)",
+    )
+    fetch_parser.add_argument(
+        "--quiet", "-q", action="store_true", help="Suppress progress messages"
+    )
+    fetch_parser.set_defaults(func=cmd_fetch)
+
+    # cache commands
+    cache_parser = subparsers.add_parser("cache", help="Manage content cache")
+    cache_subparsers = cache_parser.add_subparsers(
+        dest="cache_command", help="Cache command"
+    )
+
+    # cache list
+    cache_list_parser = cache_subparsers.add_parser("list", help="List cached items")
+    cache_list_parser.set_defaults(func=cmd_cache_list)
+
+    # cache stats
+    cache_stats_parser = cache_subparsers.add_parser(
+        "stats", help="Show cache statistics"
+    )
+    cache_stats_parser.set_defaults(func=cmd_cache_stats)
+
+    # cache clean
+    cache_clean_parser = cache_subparsers.add_parser(
+        "clean", help="Remove old cache items"
+    )
+    cache_clean_parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Remove items older than N days (default: 7)",
+    )
+    cache_clean_parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be removed"
+    )
+    cache_clean_parser.add_argument(
+        "--quiet", "-q", action="store_true", help="Only show summary"
+    )
+    cache_clean_parser.set_defaults(func=cmd_cache_clean)
+
+    # cache clear
+    cache_clear_parser = cache_subparsers.add_parser(
+        "clear", help="Remove all cache items"
+    )
+    cache_clear_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation"
+    )
+    cache_clear_parser.set_defaults(func=cmd_cache_clear)
+
+    # cache info
+    cache_info_parser = cache_subparsers.add_parser(
+        "info", help="Show cached item details"
+    )
+    cache_info_parser.add_argument("hash", help="Cache hash (directory name)")
+    cache_info_parser.set_defaults(func=cmd_cache_info)
 
     # Parse arguments
     args = parser.parse_args()
@@ -362,6 +1073,12 @@ Examples:
     if not args.command:
         parser.print_help()
         sys.exit(1)
+
+    # Handle cache subcommand
+    if args.command == "cache":
+        if not hasattr(args, "cache_command") or args.cache_command is None:
+            cache_parser.print_help()
+            sys.exit(1)
 
     # Override index path if specified
     if args.index_path:

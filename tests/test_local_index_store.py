@@ -14,7 +14,7 @@ from asta.resources.exceptions import ValidationError
 def temp_index_path():
     """Create a temporary directory for test index files"""
     with tempfile.TemporaryDirectory() as tmpdir:
-        index_path = Path(tmpdir) / ".asta" / "index.yaml"
+        index_path = Path(tmpdir) / ".asta" / "documents" / "index.yaml"
         yield index_path
 
 
@@ -704,3 +704,611 @@ async def test_search_cache_sync_on_changes(temp_index_path):
         # Search should find both
         results = await store.search("document", search_mode="fts5")
         assert len(results) == 2
+
+
+# ============================================================================
+# Update Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_update_document_name(store):
+    """Test updating a document's name"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Original Name",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+    original_modified_at = doc.modified_at
+
+    # Update the name
+    updated = await store.update(uri, name="Updated Name")
+
+    assert updated.name == "Updated Name"
+    assert updated.url == "https://example.com/doc.pdf"
+    assert updated.summary == "A test document"
+    assert updated.modified_at > original_modified_at
+    assert updated.created_at == doc.created_at
+
+
+@pytest.mark.asyncio
+async def test_update_document_url(store):
+    """Test updating a document's URL"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/old.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    # Update the URL
+    updated = await store.update(uri, url="https://example.com/new.pdf")
+
+    assert updated.url == "https://example.com/new.pdf"
+    assert updated.name == "Test Document"
+
+
+@pytest.mark.asyncio
+async def test_update_document_summary(store):
+    """Test updating a document's summary"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="Original summary",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    # Update the summary
+    updated = await store.update(uri, summary="Updated summary")
+
+    assert updated.summary == "Updated summary"
+
+
+@pytest.mark.asyncio
+async def test_update_document_tags(store):
+    """Test updating a document's tags"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["old", "tags"],
+    )
+
+    uri = await store.store(doc)
+
+    # Update the tags
+    updated = await store.update(uri, tags=["new", "tags", "here"])
+
+    assert updated.tags == ["new", "tags", "here"]
+
+
+@pytest.mark.asyncio
+async def test_update_document_extra_metadata(store):
+    """Test updating a document's extra metadata"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        extra={"author": "Original Author"},
+    )
+
+    uri = await store.store(doc)
+
+    # Update the extra metadata
+    updated = await store.update(uri, extra={"author": "Updated Author", "year": 2024})
+
+    assert updated.extra == {"author": "Updated Author", "year": 2024}
+
+
+@pytest.mark.asyncio
+async def test_update_multiple_fields(store):
+    """Test updating multiple fields at once"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Original Name",
+        url="https://example.com/old.pdf",
+        summary="Original summary",
+        mime_type="application/pdf",
+        tags=["old"],
+    )
+
+    uri = await store.store(doc)
+
+    # Update multiple fields
+    updated = await store.update(
+        uri,
+        name="New Name",
+        summary="New summary",
+        tags=["new", "tags"],
+    )
+
+    assert updated.name == "New Name"
+    assert updated.summary == "New summary"
+    assert updated.tags == ["new", "tags"]
+    assert updated.url == "https://example.com/old.pdf"
+
+
+@pytest.mark.asyncio
+async def test_update_nonexistent_document(store):
+    """Test updating a document that doesn't exist"""
+    from asta.resources.model import construct_document_uri
+
+    uri = construct_document_uri(
+        store.namespace, "00000000-0000-0000-0000-000000000000"
+    )
+
+    with pytest.raises(ValidationError, match="Document not found"):
+        await store.update(uri, name="New Name")
+
+
+@pytest.mark.asyncio
+async def test_update_validates_namespace(store):
+    """Test that update validates namespace matches"""
+    from asta.resources.model import construct_document_uri
+
+    wrong_namespace = "wrong-namespace"
+    uri = construct_document_uri(
+        wrong_namespace, "00000000-0000-0000-0000-000000000000"
+    )
+
+    with pytest.raises(ValidationError, match="Namespace mismatch"):
+        await store.update(uri, name="New Name")
+
+
+@pytest.mark.asyncio
+async def test_update_validates_empty_name(store):
+    """Test that update validates non-empty name"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    with pytest.raises(ValidationError, match="name cannot be empty"):
+        await store.update(uri, name="")
+
+
+@pytest.mark.asyncio
+async def test_update_validates_empty_url(store):
+    """Test that update validates non-empty URL"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    with pytest.raises(ValidationError, match="URL cannot be empty"):
+        await store.update(uri, url="")
+
+
+@pytest.mark.asyncio
+async def test_update_validates_url_format(store):
+    """Test that update validates URL format"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    with pytest.raises(ValidationError, match="Invalid URL format"):
+        await store.update(uri, url="not-a-valid-url")
+
+
+@pytest.mark.asyncio
+async def test_update_validates_empty_summary(store):
+    """Test that update validates non-empty summary"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    with pytest.raises(ValidationError, match="summary cannot be empty"):
+        await store.update(uri, summary="")
+
+
+@pytest.mark.asyncio
+async def test_update_persists_to_disk(temp_index_path):
+    """Test that updates persist to disk"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        doc = DocumentMetadata(
+            uri="",
+            name="Original Name",
+            url="https://example.com/doc.pdf",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+
+        uri = await store.store(doc)
+        await store.update(uri, name="Updated Name")
+
+    # Reload from disk
+    store2 = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store2:
+        retrieved = await store2.get(uri)
+        assert retrieved is not None
+        assert retrieved.name == "Updated Name"
+
+
+# ============================================================================
+# Tag Management Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_add_tags_to_document(store):
+    """Test adding tags to a document"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["original", "test"],
+    )
+
+    uri = await store.store(doc)
+
+    # Add new tags
+    updated = await store.add_tags(uri, ["new", "added"])
+
+    assert "original" in updated.tags
+    assert "test" in updated.tags
+    assert "new" in updated.tags
+    assert "added" in updated.tags
+    assert len(updated.tags) == 4
+
+
+@pytest.mark.asyncio
+async def test_add_tags_removes_duplicates(store):
+    """Test that adding duplicate tags doesn't create duplicates"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["existing"],
+    )
+
+    uri = await store.store(doc)
+
+    # Add tags including a duplicate
+    updated = await store.add_tags(uri, ["existing", "new"])
+
+    # Should only have 2 unique tags
+    assert len(updated.tags) == 2
+    assert "existing" in updated.tags
+    assert "new" in updated.tags
+
+
+@pytest.mark.asyncio
+async def test_add_tags_to_document_without_existing_tags(store):
+    """Test adding tags to a document that has no tags"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=[],
+    )
+
+    uri = await store.store(doc)
+
+    # Add tags to document without tags
+    updated = await store.add_tags(uri, ["first", "second"])
+
+    assert len(updated.tags) == 2
+    assert "first" in updated.tags
+    assert "second" in updated.tags
+
+
+@pytest.mark.asyncio
+async def test_add_tags_sorts_tags(store):
+    """Test that tags are sorted alphabetically"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["zebra"],
+    )
+
+    uri = await store.store(doc)
+    updated = await store.add_tags(uri, ["apple", "banana"])
+
+    assert updated.tags == ["apple", "banana", "zebra"]
+
+
+@pytest.mark.asyncio
+async def test_add_tags_nonexistent_document(store):
+    """Test adding tags to a non-existent document raises error"""
+    # Use a properly formatted URI with UUID
+    fake_uri = f"asta://{store.namespace}/00000000-0000-0000-0000-000000000000"
+    with pytest.raises(ValidationError, match="Document not found"):
+        await store.add_tags(fake_uri, ["tag"])
+
+
+@pytest.mark.asyncio
+async def test_remove_tags_from_document(store):
+    """Test removing tags from a document"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["keep", "remove1", "remove2"],
+    )
+
+    uri = await store.store(doc)
+
+    # Remove some tags
+    updated = await store.remove_tags(uri, ["remove1", "remove2"])
+
+    assert len(updated.tags) == 1
+    assert "keep" in updated.tags
+    assert "remove1" not in updated.tags
+    assert "remove2" not in updated.tags
+
+
+@pytest.mark.asyncio
+async def test_remove_tags_ignores_nonexistent_tags(store):
+    """Test that removing non-existent tags doesn't raise error"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["existing"],
+    )
+
+    uri = await store.store(doc)
+
+    # Remove tags that don't exist (should be silently ignored)
+    updated = await store.remove_tags(uri, ["nonexistent", "also-nonexistent"])
+
+    assert len(updated.tags) == 1
+    assert "existing" in updated.tags
+
+
+@pytest.mark.asyncio
+async def test_remove_all_tags(store):
+    """Test removing all tags from a document"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["tag1", "tag2"],
+    )
+
+    uri = await store.store(doc)
+
+    # Remove all tags
+    updated = await store.remove_tags(uri, ["tag1", "tag2"])
+
+    assert len(updated.tags) == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_tags_nonexistent_document(store):
+    """Test removing tags from a non-existent document raises error"""
+    # Use a properly formatted URI with UUID
+    fake_uri = f"asta://{store.namespace}/00000000-0000-0000-0000-000000000000"
+    with pytest.raises(ValidationError, match="Document not found"):
+        await store.remove_tags(fake_uri, ["tag"])
+
+
+@pytest.mark.asyncio
+async def test_get_documents_by_tags_any(store):
+    """Test getting documents by tags (any match)"""
+    doc1 = DocumentMetadata(
+        uri="",
+        name="Doc 1",
+        url="https://example.com/doc1.pdf",
+        summary="First document",
+        mime_type="application/pdf",
+        tags=["ai", "ml"],
+    )
+    doc2 = DocumentMetadata(
+        uri="",
+        name="Doc 2",
+        url="https://example.com/doc2.pdf",
+        summary="Second document",
+        mime_type="application/pdf",
+        tags=["ai", "nlp"],
+    )
+    doc3 = DocumentMetadata(
+        uri="",
+        name="Doc 3",
+        url="https://example.com/doc3.pdf",
+        summary="Third document",
+        mime_type="application/pdf",
+        tags=["web", "backend"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+    await store.store(doc3)
+
+    # Get documents with any of the specified tags
+    results = await store.get_documents_by_tags(["ai", "nlp"], match_all=False)
+
+    assert len(results) == 2
+    names = {doc.name for doc in results}
+    assert "Doc 1" in names
+    assert "Doc 2" in names
+
+
+@pytest.mark.asyncio
+async def test_get_documents_by_tags_all(store):
+    """Test getting documents by tags (all match)"""
+    doc1 = DocumentMetadata(
+        uri="",
+        name="Doc 1",
+        url="https://example.com/doc1.pdf",
+        summary="First document",
+        mime_type="application/pdf",
+        tags=["ai", "ml", "research"],
+    )
+    doc2 = DocumentMetadata(
+        uri="",
+        name="Doc 2",
+        url="https://example.com/doc2.pdf",
+        summary="Second document",
+        mime_type="application/pdf",
+        tags=["ai", "research"],
+    )
+    doc3 = DocumentMetadata(
+        uri="",
+        name="Doc 3",
+        url="https://example.com/doc3.pdf",
+        summary="Third document",
+        mime_type="application/pdf",
+        tags=["ai"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+    await store.store(doc3)
+
+    # Get documents with all specified tags
+    results = await store.get_documents_by_tags(["ai", "research"], match_all=True)
+
+    assert len(results) == 2
+    names = {doc.name for doc in results}
+    assert "Doc 1" in names
+    assert "Doc 2" in names
+
+
+@pytest.mark.asyncio
+async def test_get_documents_by_tags_no_matches(store):
+    """Test getting documents by tags when no matches exist"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["ai"],
+    )
+
+    await store.store(doc)
+
+    results = await store.get_documents_by_tags(["nonexistent"], match_all=False)
+
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_get_documents_by_tags_empty_tags(store):
+    """Test getting documents when they have no tags"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=[],
+    )
+
+    await store.store(doc)
+
+    results = await store.get_documents_by_tags(["ai"], match_all=False)
+
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_tag_operations_update_modified_timestamp(store):
+    """Test that tag operations update the modified timestamp"""
+    import asyncio
+
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+        tags=["original"],
+    )
+
+    uri = await store.store(doc)
+    original_doc = await store.get(uri)
+    original_modified = original_doc.modified_at
+
+    # Wait a bit to ensure timestamp changes
+    await asyncio.sleep(0.001)
+
+    # Add tags
+    updated = await store.add_tags(uri, ["new"])
+    assert updated.modified_at >= original_modified
+
+    # Wait again
+    await asyncio.sleep(0.001)
+
+    # Remove tags
+    updated2 = await store.remove_tags(uri, ["new"])
+    assert updated2.modified_at >= updated.modified_at
+
+
+@pytest.mark.asyncio
+async def test_tag_operations_persist_to_disk(temp_index_path):
+    """Test that tag operations persist to disk"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        doc = DocumentMetadata(
+            uri="",
+            name="Test Document",
+            url="https://example.com/doc.pdf",
+            summary="A test document",
+            mime_type="application/pdf",
+            tags=["original"],
+        )
+
+        uri = await store.store(doc)
+        await store.add_tags(uri, ["added"])
+
+    # Reload from disk
+    store2 = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store2:
+        retrieved = await store2.get(uri)
+        assert retrieved is not None
+        assert "original" in retrieved.tags
+        assert "added" in retrieved.tags

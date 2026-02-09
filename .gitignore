@@ -68,7 +68,9 @@ out/
 temp/
 tmp/
 .asta/*
-!.asta/index.yaml
+!.asta/documents/
+.asta/documents/*
+!.asta/documents/index.yaml
 
 # Unrelated directories
 a2a-poc/

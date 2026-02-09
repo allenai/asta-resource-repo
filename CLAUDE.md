@@ -2,7 +2,7 @@
 
 **Audience**: This file is for **agent-developers** working on the asta-resource-repo codebase itself.
 
-**For agent-users** (using this tool for document management): See [README.md](README.md) and [MCP_SETUP.md](MCP_SETUP.md) instead.
+**For agent-users** (using this tool for document management): See [README.md](README.md) and the **Asta Documents skill** (`.claude/commands/asta-documents.md`).
 
 ---
 
@@ -10,16 +10,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-The Asta Resource Repository is a lightweight, git-friendly document metadata index that requires zero external dependencies. It provides MCP (Model Context Protocol) tools and a CLI for managing document metadata locally.
+The Asta Resource Repository is a lightweight, git-friendly document metadata index that requires zero external dependencies. It provides a CLI (`asta-index`) and Claude Code skill for managing document metadata locally.
 
 **Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by URIs in the format `asta://{namespace}/{uuid}`.
+
+**Integration**: The primary integration method is the **Asta Documents skill** (`.claude/commands/asta-documents.md`) which provides complete functionality via CLI commands. The MCP server (`mcp_server.py`) is deprecated but kept for backward compatibility.
 
 ## Architecture
 
 ### Local-Only Design
 
 **No Databases, No Servers, No Docker**
-- Single YAML file (`.asta/index.yaml`) stores all metadata
+- Single YAML file (`.asta/documents/index.yaml`) stores all metadata
 - No PostgreSQL, no REST API, no external services
 - Git-friendly: diffs show exactly what changed
 - Portable: copy `.asta/` folder to any project
@@ -53,27 +55,17 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
    - Combines BM25 + semantic results
    - Configurable weights
 
-6. **`mcp_tools.py`**: MCP tool definitions
-   - `add_document`: Add document metadata to index
-   - `get_document`: Retrieve metadata by URI
-   - `list_documents`: List all documents
-   - `search_documents`: Multi-mode search with relevance scoring
-
-7. **`mcp_server.py`**: Stdio transport MCP server
-   - Entry point for Claude Desktop/Code integration
-   - Single-user model (no authentication)
-
-8. **`cli/index_cli.py`**: Command-line interface
+6. **`cli/index_cli.py`**: Command-line interface (PRIMARY INTERFACE)
    - `asta-index` commands for manual management
    - Human-friendly output with `--json` option
    - Search mode selection and score display
 
-9. **`model.py`**: Data models
+7. **`model.py`**: Data models
    - `DocumentMetadata`: Metadata-only model (no content field)
    - `SearchHit`: Search result with relevance score
    - Fields: `uri`, `name`, `url`, `summary`, `tags`, `mime_type`, `created_at`, `modified_at`, `extra`
 
-10. **`config/`**: HOCON-based configuration
+8. **`config/`**: HOCON-based configuration
     - Search parameters (BM25 k1/b, field weights)
     - Embedding model configuration
     - Hybrid search weights
@@ -103,7 +95,7 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 
 ### Index File Structure
 
-The `.asta/index.yaml` file contains:
+The `.asta/documents/index.yaml` file contains:
 
 ```yaml
 version: "1.0"
@@ -132,7 +124,7 @@ The search system provides multiple strategies optimized for different use cases
 ```
 YAML Index (Source of Truth)
     ↓ (on modification)
-SQLite Cache (.asta/search.db)
+SQLite Cache (.asta/documents/search.db)
     ├─→ FTS5 Full-Text Index (keyword search)
     ├─→ BM25 Scoring Tables (term frequencies)
     └─→ Embeddings Table (semantic vectors)
@@ -437,12 +429,12 @@ except Exception:
 
 **Changing embedding model**:
 1. Update `model` in `local.conf`
-2. Delete `.asta/search.db` to clear old embeddings
+2. Delete `.asta/documents/search.db` to clear old embeddings
 3. Run search to regenerate with new model
 
 ## Configuration
 
-Configuration uses HOCON format. The index file location is fixed at `.asta/index.yaml` relative to the current directory.
+Configuration uses HOCON format. The index file location is fixed at `.asta/documents/index.yaml` relative to the current directory.
 
 **Default config** (`src/asta/resources/config/local.conf`):
 ```hocon
@@ -473,8 +465,8 @@ allowed_mime_types = [
 
 **Outside git or no remote:**
 - Format: `local:{absolute_path}`
-- Example: `local:/Users/you/project/.asta/index.yaml`
-- URIs: `asta://local:/Users/you/project/.asta/index.yaml/550e8400-...`
+- Example: `local:/Users/you/project/.asta/documents/index.yaml`
+- URIs: `asta://local:/Users/you/project/.asta/documents/index.yaml/550e8400-...`
 - Benefit: Still works without git
 
 **No branch isolation:**
@@ -488,7 +480,7 @@ allowed_mime_types = [
 **Recommended for teams:**
 ```bash
 # Track the index file in git
-git add .asta/index.yaml
+git add .asta/documents/index.yaml
 git commit -m "Add document index"
 git push
 ```
@@ -499,7 +491,7 @@ When tracked in git:
 - ✅ Document metadata is versioned alongside code
 
 **Personal use (untracked):**
-- `.gitignore` allows tracking `.asta/index.yaml` but ignores other `.asta/` files
+- `.gitignore` allows tracking `.asta/documents/index.yaml` but ignores other `.asta/` files
 - If not committed, the index is local-only
 - URIs still use git-based namespaces but aren't portable across machines
 
@@ -581,6 +573,39 @@ hits = await search_documents(
 - `semantic`: Embedding-based semantic search (requires `--extra search`)
 - `hybrid`: Combined BM25 + semantic (requires `--extra search`)
 
+### update_document
+
+Update document metadata fields.
+
+```python
+# Update single field
+doc = await update_document(
+    document_uri="asta://allenai/asta-resource-repo/550e8400-...",
+    name="Updated Document Title"
+)
+
+# Update multiple fields
+doc = await update_document(
+    document_uri="asta://allenai/asta-resource-repo/550e8400-...",
+    name="New Title",
+    summary="Updated summary text",
+    tags=["updated", "revised"]
+)
+```
+
+**Parameters**:
+- `document_uri`: Document URI (required)
+- `name`: New document name (optional)
+- `url`: New document URL (optional)
+- `summary`: New summary (optional)
+- `mime_type`: New MIME type (optional)
+- `tags`: New tags list (optional, replaces existing)
+- `extra_metadata`: New extra metadata (optional, replaces existing)
+
+**Returns**: `DocumentMetadata` with updated fields
+
+**Note**: Only provided fields are updated. The `modified_at` timestamp is automatically updated.
+
 ## CLI Commands
 
 ### Installation
@@ -628,52 +653,111 @@ uv run asta-index search "deep learning" --mode=hybrid --show-scores
 # Get specific document
 uv run asta-index get asta://owner/repo/UUID
 
+# Update document metadata
+uv run asta-index update asta://owner/repo/UUID \
+  --name="Updated Title" \
+  --summary="Updated summary text" \
+  --tags="updated,revised"
+
+# Update with JSON output
+uv run asta-index --json update asta://owner/repo/UUID \
+  --name="New Title"
+
 # Remove document
 uv run asta-index remove asta://owner/repo/UUID
 
 # Show index information
 uv run asta-index show
 
+# Fetch document content (with automatic caching)
+uv run asta-index fetch asta://owner/repo/UUID -o document.pdf
+
+# Fetch to stdout
+uv run asta-index fetch asta://owner/repo/UUID > document.pdf
+
+# Force refresh (bypass cache)
+uv run asta-index fetch asta://owner/repo/UUID -o document.pdf --force
+
+# Cache management
+uv run asta-index cache list              # List cached items
+uv run asta-index cache stats             # Show cache statistics
+uv run asta-index cache clean --days 7    # Remove items older than 7 days
+uv run asta-index cache clear             # Clear entire cache
+uv run asta-index cache info <hash>       # Show cached item details
+
 # JSON output (for scripting)
 uv run asta-index list --json
+uv run asta-index cache stats --json
 ```
 
-## MCP Integration
+### Content Fetching with Caching
 
-### Claude Desktop Setup
+The CLI includes built-in content fetching with automatic caching:
 
-Add to `claude_desktop_config.json`:
+**Features:**
+- Automatic cache checking (SHA256 hash of document URL)
+- 7-day default cache freshness (configurable with `--max-age`)
+- Downloads and caches content on first request
+- Instant retrieval from cache on subsequent requests
+- Cache stored in `.asta/cache/` (gitignored)
 
-```json
-{
-  "mcpServers": {
-    "asta-resources": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/asta-resource-repo",
-        "asta-resources-mcp"
-      ]
-    }
-  }
-}
-```
-
-Restart Claude Desktop, then use MCP tools from chat:
-- "Add a document about Transformers at https://arxiv.org/..."
-- "List all documents tagged with 'ai'"
-- "Search for papers about attention mechanisms"
-
-### MCP Server (Stdio)
-
-Run standalone MCP server:
+**Workflow for reading document content:**
 
 ```bash
-uv run asta-resources-mcp
+# 1. Fetch document (uses cache if available)
+uv run asta-index fetch asta://namespace/uuid -o /tmp/doc.pdf
+
+# 2. Use Read tool to extract and display content
+# Read(/tmp/doc.pdf)
+# The Read tool has native PDF support for text extraction
 ```
 
-This runs in stdio mode for MCP client integration. No authentication required (single-user model).
+**Cache management:**
+
+```bash
+# Check what's cached
+uv run asta-index cache list
+
+# View statistics (size, age distribution, content types)
+uv run asta-index cache stats
+
+# Clean old cache entries
+uv run asta-index cache clean --days 7
+
+# Clear everything
+uv run asta-index cache clear
+```
+
+## Claude Code Integration
+
+### Asta Documents Skill (Recommended)
+
+The primary integration method is the **Asta Documents skill** located at `.claude/commands/asta-documents.md`.
+
+**Usage in Claude Code:**
+```
+💬 "Use /asta-documents to add a paper at https://arxiv.org/pdf/1706.03762.pdf
+    about Transformers, tags: ai, research"
+
+💬 "Use /asta-documents to search for papers about attention mechanisms"
+
+💬 "Use /asta-documents to fetch asta://namespace/uuid"
+```
+
+**The skill provides:**
+- Complete document management (add, update, remove, list)
+- Search with multiple modes (simple, keyword, semantic, hybrid)
+- Content fetching with automatic caching
+- Tag management
+- Metadata operations
+
+**Aliases:** `/asta`, `/asta-docs`, `/docs`, `/fetch-asta-content`
+
+See `.claude/commands/asta-documents.md` for complete documentation.
+
+### MCP Integration (Deprecated)
+
+The MCP server integration (`asta-resources-mcp`) is deprecated. Use the skill instead for better performance and easier setup. MCP files (`mcp_tools.py`, `mcp_server.py`) are kept for backward compatibility only.
 
 ## Development Commands
 
@@ -733,6 +817,82 @@ bd create "Task title" -d "Description" -p 1 -t feature
 
 See `BEADS.md` for detailed workflows.
 
+## Skills
+
+Claude Code skills are stored in `.claude/commands/` as markdown files. Skills provide specialized instructions for common tasks.
+
+### Available Skills
+
+**fetch-asta-content** (aliases: `read-asta-doc`, `get-asta-content`, `show-asta-doc`)
+
+Fetches and displays content from documents stored in Asta using the `asta-index` CLI with intelligent caching.
+
+**Simplified workflow:**
+
+```bash
+# 1. Fetch document content (automatic caching)
+uv run asta-index fetch asta://namespace/uuid -o /tmp/document.pdf
+
+# 2. Use Read tool to extract and display
+# Read(/tmp/document.pdf)
+```
+
+**Key features:**
+- Automatic cache checking (SHA256 hash of document URL)
+- 7-day default cache freshness (configurable)
+- Instant retrieval from cache on subsequent requests
+- Built-in cache management commands
+
+**Cache management:**
+
+```bash
+# View cached items
+uv run asta-index cache list
+
+# Show cache statistics
+uv run asta-index cache stats
+
+# Remove old entries (> 7 days)
+uv run asta-index cache clean --days 7
+
+# Clear entire cache
+uv run asta-index cache clear
+
+# Show specific item details
+uv run asta-index cache info <hash>
+```
+
+**How it works:**
+1. `asta-index fetch` retrieves document metadata from Asta index
+2. Checks local cache (`.asta/cache/`) using SHA256 hash of URL
+3. Uses cached content if fresh (< max-age days)
+4. Downloads and caches if not present or expired
+5. Saves to specified output file
+
+**Example:**
+```
+User: "Show me the Introduction from asta://allenai/asta-resource-repo/abc-123"
+
+Agent workflow:
+1. uv run asta-index fetch asta://...abc-123 -o /tmp/doc.pdf -q
+2. Read(/tmp/doc.pdf) - Claude extracts and displays the Introduction
+
+User: "Show me the Methods section" (same document)
+
+Agent workflow:
+1. uv run asta-index fetch asta://...abc-123 -o /tmp/doc.pdf -q
+   # Uses cache instantly (no re-download)
+2. Read(/tmp/doc.pdf) - Claude extracts and displays Methods
+```
+
+**Why this approach:**
+- Uses unified CLI instead of separate scripts
+- Native PDF support via Read tool (better text extraction)
+- All cache operations integrated into asta-index CLI
+- Consistent command structure with other operations
+
+See `.claude/commands/fetch-asta-content.md` for complete documentation.
+
 ## Common Patterns
 
 ### Adding New Metadata Fields
@@ -774,7 +934,7 @@ MCP tools raise exceptions directly; CLI converts them to user-friendly messages
 - **No External Dependencies**: Zero runtime dependencies except Python stdlib + YAML parser
 - **URI Format**: All document URIs follow `asta://{namespace}/{uuid}` where namespace is auto-derived from git
 - **Namespace Derivation**: Automatic from git repo (no configuration needed)
-- **Git-Friendly**: `.asta/index.yaml` should be committed for team sharing
+- **Git-Friendly**: `.asta/documents/index.yaml` should be committed for team sharing
 - **Branch Isolation**: Each git branch gets its own namespace (intentional design)
 - **Async/Await**: All document store operations are async for future extensibility
 - **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
@@ -783,14 +943,14 @@ MCP tools raise exceptions directly; CLI converts them to user-friendly messages
 
 ### Index File Corruption
 
-If `.asta/index.yaml` becomes corrupted:
+If `.asta/documents/index.yaml` becomes corrupted:
 
 ```bash
 # Backup corrupt file
-cp .asta/index.yaml .asta/index.yaml.backup
+cp .asta/documents/index.yaml .asta/documents/index.yaml.backup
 
 # Recreate empty index
-rm .asta/index.yaml
+rm .asta/documents/index.yaml
 uv run asta-index list  # Creates new empty index
 ```
 
@@ -835,29 +995,14 @@ uv run asta-index search "attention"
 # Search with scores
 uv run asta-index search "transformer" --show-scores
 
+# Update document metadata (use URI from add command output)
+uv run asta-index update asta://allenai/asta-resource-repo/UUID \
+  --tags="ai,nlp,transformers,updated"
+
 # View the index file directly
-cat .asta/index.yaml
+cat .asta/documents/index.yaml
 
 # Commit to git
-git add .asta/index.yaml
+git add .asta/documents/index.yaml
 git commit -m "Add transformer paper to index"
 ```
-
-## Migration from Previous Versions
-
-If migrating from older versions:
-
-**From PostgreSQL/REST API versions:**
-1. **No automatic migration tool** - data must be manually re-added
-2. Previous database contents are not compatible with YAML index
-3. REST API and unified server have been removed
-4. User authentication (`ASTA_USER`) is no longer required
-5. File size limits removed (no content storage)
-
-**From "local-index" namespace versions:**
-1. Namespace is now auto-derived from git (no longer configurable)
-2. Old URIs with `asta://local-index/...` won't match new git-based namespaces
-3. Index files must be recreated - URIs will change to reflect git context
-4. No migration tool provided (breaking change for simplicity)
-
-Start with a fresh index using `asta-index add` commands.
