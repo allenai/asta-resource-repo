@@ -103,7 +103,7 @@ class LocalIndexDocumentStore(DocumentStore):
                         self._embedding_manager = None
                 elif self._enable_embeddings and not EMBEDDINGS_AVAILABLE:
                     logger.info(
-                        "Embeddings disabled: sentence-transformers not installed. Install with: uv sync --extra search"
+                        "Embeddings disabled: sentence-transformers not available."
                     )
 
             except Exception as e:
@@ -495,9 +495,7 @@ class LocalIndexDocumentStore(DocumentStore):
             List of search hits ranked by semantic similarity
         """
         if not self._embedding_manager:
-            raise ImportError(
-                "Semantic search not available. Install with: uv sync --extra search"
-            )
+            raise ImportError("Semantic search not available.")
 
         # Ensure all documents have embeddings
         await self._embedding_manager.ensure_embeddings(self._documents)
@@ -530,9 +528,7 @@ class LocalIndexDocumentStore(DocumentStore):
             List of search hits ranked by hybrid score
         """
         if not self._embedding_manager:
-            raise ImportError(
-                "Hybrid search not available. Install with: uv sync --extra search"
-            )
+            raise ImportError("Hybrid search not available.")
 
         # Ensure cache and embeddings ready
         await self._search_cache.ensure_synced(self._documents)

@@ -18,21 +18,21 @@ This tool helps you and your AI agents keep track of documents by storing **meta
 
 ## Installation
 
-**One-line install:**
+**Prerequisites**: Python 3.10+ and [uv](https://docs.astral.sh/uv/) package manager
+
+**Install with uv:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/allenai/asta-resource-repo/main/install.sh | bash
+uv tool install git+https://github.com/allenai/asta-resource-repo.git
 ```
 
-The installer automatically:
-- ✅ Installs uv package manager (if needed)
-- ✅ Clones to `~/.asta-resources`
-- ✅ Installs dependencies
-- ✅ Shows MCP setup instructions
+This installs the `asta-documents` CLI globally. To enable semantic search:
+
+```bash
+uv tool install --with sentence-transformers --with numpy git+https://github.com/allenai/asta-resource-repo.git
+```
 
 **Full installation guide**: [INSTALL.md](INSTALL.md)
-
-**Requirements**: Python 3.10+ (installer checks automatically)
 
 ## Quick Start with Claude Code
 
@@ -59,9 +59,12 @@ The Asta skill (`/asta-documents`) provides complete document management via the
 - Manage tags and metadata
 - List and filter documents
 
-**Skill location:** `.claude/commands/asta-documents.md`
+**Install the skill:**
+```bash
+curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/allenai/asta-resource-repo/main/skills/asta-documents.md
+```
 
-See the skill file for complete documentation and examples.
+See `skills/asta-documents.md` in this repository for complete documentation.
 
 ## Advanced Search
 
@@ -87,26 +90,14 @@ Asta includes a sophisticated search system with multiple modes optimized for di
 **🧠 Semantic Mode** (Embeddings)
 - Understands meaning and concepts, not just keywords
 - Best for natural language queries like "papers about attention mechanisms"
-- Uses sentence-transformers for offline AI embeddings
-- Requires installation: `uv sync --extra search` (~80MB model download)
+- Uses sentence-transformers for offline AI embeddings (~80MB model download on first use)
 
 **🚀 Hybrid Mode** (BM25 + Semantic)
 - Combines keyword precision with semantic understanding
 - Best overall relevance (~80-85% precision@10)
 - Uses Reciprocal Rank Fusion to merge results
-- Requires installation: `uv sync --extra search`
 
-### Installing Semantic Search
-
-To enable semantic and hybrid search:
-
-```bash
-# Install with semantic search support
-cd /path/to/asta-resource-repo
-uv sync --extra search
-```
-
-This installs `sentence-transformers` and downloads the `all-MiniLM-L6-v2` model (~80MB, optimized for CPU).
+The semantic search model (`all-MiniLM-L6-v2`, ~80MB) downloads automatically on first use.
 
 ### Performance
 
@@ -120,12 +111,14 @@ All modes run locally with no external API calls.
 
 ## Command Line Usage
 
-Prefer the command line? Use the `asta-index` CLI:
+After installation, use the `asta-documents` CLI:
+
+> **Note:** If you're developing locally (cloned repo), use `uv run asta-documents` instead.
 
 ### Add a Document
 
 ```bash
-uv run asta-index add https://arxiv.org/pdf/1706.03762.pdf \
+asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
   --name="Attention Is All You Need" \
   --summary="Seminal paper on Transformer architecture" \
   --tags="ai,nlp,transformers" \
@@ -137,66 +130,66 @@ uv run asta-index add https://arxiv.org/pdf/1706.03762.pdf \
 
 ```bash
 # List all
-uv run asta-index list
+asta-documents list
 
 # Filter by tags
-uv run asta-index list --tags="ai,research"
+asta-documents list --tags="ai,research"
 
 # Verbose output
-uv run asta-index list -v
+asta-documents list -v
 
 # JSON output (for scripts)
-uv run asta-index list --json
+asta-documents list --json
 ```
 
 ### Search Documents
 
 ```bash
 # Auto mode (uses best available method)
-uv run asta-index search "transformer architecture"
+asta-documents search "transformer architecture"
 
 # Keyword search with scores
-uv run asta-index search "neural networks" --mode=keyword --show-scores
+asta-documents search "neural networks" --mode=keyword --show-scores
 
-# Semantic search (requires: uv sync --extra search)
-uv run asta-index search "papers about attention mechanisms" --mode=semantic
+# Semantic search (requires installation with --with sentence-transformers)
+asta-documents search "papers about attention mechanisms" --mode=semantic
 
 # Hybrid search for best results
-uv run asta-index search "deep learning" --mode=hybrid --show-scores
+asta-documents search "deep learning" --mode=hybrid --show-scores
 
 # See all options
-uv run asta-index search --help
+asta-documents search --help
 ```
 
 **Search mode options:**
 - `--mode=auto` - Auto-select best available (default)
 - `--mode=simple` - Fast substring matching
 - `--mode=keyword` - BM25 keyword ranking
-- `--mode=semantic` - AI embeddings (requires `--extra search`)
-- `--mode=hybrid` - Combined BM25 + semantic (requires `--extra search`)
+- `--mode=semantic` - AI embeddings (requires sentence-transformers)
+- `--mode=hybrid` - Combined BM25 + semantic (requires sentence-transformers)
 - `--show-scores` - Display relevance scores
 
 ### Get Document Details
 
 ```bash
-uv run asta-index get asta://owner/repo/UUID
+asta-documents get asta://owner/repo/UUID
 ```
 
 ### Update Document Metadata
 
 ```bash
 # Update single field
-uv run asta-index update asta://owner/repo/UUID \
+asta-documents update asta://owner/repo/UUID \
   --name="Updated Title"
 
 # Update multiple fields
-uv run asta-index update asta://owner/repo/UUID \
+asta-documents update asta://owner/repo/UUID \
   --name="New Title" \
   --summary="Updated summary" \
   --tags="revised,updated"
 
 # Update with JSON output
-uv run asta-index --json update asta://owner/repo/UUID \
+asta-documents --json update asta://owner/repo/UUID \
   --tags="new,tags"
 ```
 
@@ -211,13 +204,13 @@ uv run asta-index --json update asta://owner/repo/UUID \
 ### Remove Document
 
 ```bash
-uv run asta-index remove asta://owner/repo/UUID
+asta-documents remove asta://owner/repo/UUID
 ```
 
 ### Show Index Stats
 
 ```bash
-uv run asta-index show
+asta-documents show
 ```
 
 ## How It Works
@@ -312,7 +305,7 @@ Each document has:
 
 Track papers, articles, and preprints:
 ```bash
-uv run asta-index add https://arxiv.org/pdf/2304.08485.pdf \
+asta-documents add https://arxiv.org/pdf/2304.08485.pdf \
   --name="LLaMA: Open Foundation Models" \
   --summary="Meta's open source LLM" \
   --tags="ai,llm,research" \
@@ -323,7 +316,7 @@ uv run asta-index add https://arxiv.org/pdf/2304.08485.pdf \
 
 Organize web resources:
 ```bash
-uv run asta-index add https://modelcontextprotocol.io/ \
+asta-documents add https://modelcontextprotocol.io/ \
   --name="Model Context Protocol" \
   --summary="MCP documentation and guides" \
   --tags="mcp,documentation,reference"
@@ -333,7 +326,7 @@ uv run asta-index add https://modelcontextprotocol.io/ \
 
 Index project-related documents:
 ```bash
-uv run asta-index add https://github.com/user/repo/blob/main/DESIGN.md \
+asta-documents add https://github.com/user/repo/blob/main/DESIGN.md \
   --name="Project Design Doc" \
   --summary="Architecture and design decisions" \
   --tags="internal,design,architecture"
@@ -358,11 +351,11 @@ To use separate indexes for different projects:
 ```bash
 # Work project
 cd ~/work-project
-uv run asta-index list
+asta-documents list
 
 # Personal project
 cd ~/personal-project
-uv run asta-index list
+asta-documents list
 ```
 
 Each directory gets its own `.asta/documents/index.yaml` file.
@@ -390,16 +383,12 @@ Install uv:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### MCP Server Not Working
-
-See detailed troubleshooting in [MCP_SETUP.md](MCP_SETUP.md).
-
 ### Index File Not Found
 
 The index file is created automatically on first use. If missing:
 ```bash
 mkdir -p .asta
-uv run asta-index show  # Creates empty index
+asta-documents show  # Creates empty index
 ```
 
 ## Development
@@ -423,10 +412,8 @@ make code-check
 
 ## Links
 
-- **Asta Skill**: `.claude/commands/asta-documents.md` (recommended for Claude Code)
+- **Asta Skill**: [skills/asta-documents.md](skills/asta-documents.md) (install for Claude Code)
 - **Development Guide**: [CLAUDE.md](CLAUDE.md)
-- **MCP Setup** (deprecated): [MCP_SETUP.md](MCP_SETUP.md)
-- **Chatbot Usage**: [README_CHATBOT.md](README_CHATBOT.md)
 - **Beads Issue Tracker**: https://github.com/steveyegge/beads
 
 ## License

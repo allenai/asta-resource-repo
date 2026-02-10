@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS document_stats (
     length_name INTEGER,
     length_summary INTEGER,
     length_tags INTEGER,
+    length_extra INTEGER,
     length_total INTEGER,
     FOREIGN KEY (uri) REFERENCES documents(uri)
 );
