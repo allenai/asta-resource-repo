@@ -106,7 +106,7 @@ uv run pytest tests/test_local_index_store.py \
 ## Test Environment
 
 All tests use:
-- **Temporary directories**: Each test creates isolated `.asta/index.yaml` files
+- **Temporary directories**: Each test creates isolated `.asta/documents/index.yaml` files
 - **In-memory operations**: Fast execution
 - **No cleanup required**: Temporary directories auto-delete
 - **Async fixtures**: Using `pytest-asyncio` for async test support

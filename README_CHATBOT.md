@@ -106,7 +106,7 @@ Now you can chat naturally:
 2. **Tool Discovery**: Lists available tools from the MCP server
 3. **Command Processing**: Parses user commands and calls appropriate MCP tools
 4. **Claude Integration** (optional): When an API key is present, natural language input is sent to Claude with tool definitions, allowing Claude to decide which tools to call
-5. **Metadata-Only**: Manages document metadata (URLs, summaries, tags) stored in `.asta/index.yaml` without storing actual document content
+5. **Metadata-Only**: Manages document metadata (URLs, summaries, tags) stored in `.asta/documents/index.yaml` without storing actual document content
 
 ## Architecture
 

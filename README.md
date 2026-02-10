@@ -4,16 +4,17 @@ A lightweight document metadata index for AI coding agents. Track documents, pap
 
 ## What It Does
 
-This tool helps you and your AI agents keep track of documents by storing **metadata only** (URLs, summaries, tags) in a simple `.asta/index.yaml` file. Think of it as a smart bookmark manager that AI agents can use.
+This tool helps you and your AI agents keep track of documents by storing **metadata only** (URLs, summaries, tags) in a simple `.asta/documents/index.yaml` file. Think of it as a smart bookmark manager that AI agents can use.
 
 **Key Features:**
 - 📋 **Metadata only**: URLs, summaries, tags—no content storage
-- 🤖 **MCP integration**: Works natively with Claude Desktop and Claude Code
+- 🔧 **CLI + Skill**: Full document management via command line and Claude Code skill
 - ⚡ **Zero setup**: No databases, no Docker, no external services
 - 📝 **Git-friendly**: Human-readable YAML diffs
-- 🔍 **Searchable**: Full-text search across all metadata fields
+- 🔍 **Searchable**: Multiple search modes (simple, keyword, semantic, hybrid)
 - 🏷️ **Taggable**: Organize with custom tags
 - 🚀 **Portable**: Copy `.asta/` folder anywhere
+- 💾 **Smart caching**: Automatic content caching with SHA256 verification
 
 ## Installation
 
@@ -33,59 +34,34 @@ The installer automatically:
 
 **Requirements**: Python 3.10+ (installer checks automatically)
 
-## Quick Start with Claude
+## Quick Start with Claude Code
 
-### For Claude Code Users
+### Using the Asta Skill
 
-**Complete setup guide**: See [MCP_SETUP.md](MCP_SETUP.md)
+The Asta skill (`/asta-documents`) provides complete document management via the CLI. No MCP server configuration needed!
 
-**Quick config:**
-1. Press `Cmd+Shift+P` → "MCP: Edit Configuration"
-2. Add this server (replace path with your repo location):
+**Usage:**
+```
+💬 "Use /asta-documents to add a paper at https://arxiv.org/pdf/1706.03762.pdf
+    about Transformers, tags: ai, research, nlp"
 
-```json
-{
-  "mcpServers": {
-    "asta-resources": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/asta-resource-repo",
-        "asta-resources-mcp"
-      ]
-    }
-  }
-}
+💬 "Use /asta-documents to search for papers about attention mechanisms"
+
+💬 "Use /asta-documents to list all documents tagged with research"
+
+💬 "Use /asta-documents to fetch asta://namespace/uuid"
 ```
 
-3. Reload MCP servers (`Cmd+Shift+P` → "MCP: Reload Servers")
+**The skill handles all operations:**
+- Add, update, remove documents
+- Search with multiple modes (keyword, semantic, hybrid)
+- Fetch document content with automatic caching
+- Manage tags and metadata
+- List and filter documents
 
-### For Claude Desktop Users
+**Skill location:** `.claude/commands/asta-documents.md`
 
-See [MCP_SETUP.md](MCP_SETUP.md) for complete instructions.
-
-### Using with Claude
-
-Once configured, just talk naturally to Claude:
-
-```
-💬 "Add a document at https://arxiv.org/pdf/1706.03762.pdf
-    about the Transformer architecture,
-    tags: ai, research, nlp"
-
-💬 "List all documents tagged with 'research'"
-
-💬 "Search for papers about attention mechanisms"
-
-💬 "Show me all my AI-related documents"
-```
-
-Claude will use these MCP tools:
-- `add_document` - Add document metadata
-- `list_documents` - List all documents
-- `search_documents` - Search by keywords (with multiple modes)
-- `get_document` - Get details by URI
+See the skill file for complete documentation and examples.
 
 ## Advanced Search
 
@@ -206,6 +182,32 @@ uv run asta-index search --help
 uv run asta-index get asta://owner/repo/UUID
 ```
 
+### Update Document Metadata
+
+```bash
+# Update single field
+uv run asta-index update asta://owner/repo/UUID \
+  --name="Updated Title"
+
+# Update multiple fields
+uv run asta-index update asta://owner/repo/UUID \
+  --name="New Title" \
+  --summary="Updated summary" \
+  --tags="revised,updated"
+
+# Update with JSON output
+uv run asta-index --json update asta://owner/repo/UUID \
+  --tags="new,tags"
+```
+
+**Available update fields:**
+- `--name` - Document title
+- `--url` - Document URL
+- `--summary` - Text description
+- `--mime-type` - MIME type
+- `--tags` - Tags (replaces existing)
+- `--extra` - Extra metadata JSON (replaces existing)
+
 ### Remove Document
 
 ```bash
@@ -222,7 +224,7 @@ uv run asta-index show
 
 ### Index File
 
-All metadata is stored in `.asta/index.yaml`:
+All metadata is stored in `.asta/documents/index.yaml`:
 
 ```yaml
 version: "1.0"
@@ -252,7 +254,7 @@ Document URIs are automatically derived from your git repository:
 
 **Outside git (or no remote configured):**
 - Format: `asta://local:{absolute_path}/{uuid}`
-- Example: `asta://local:/Users/you/project/.asta/index.yaml/550e8400-...`
+- Example: `asta://local:/Users/you/project/.asta/documents/index.yaml/550e8400-...`
 - URIs are local-only and not shareable
 
 ### Git Tracking Behavior
@@ -260,7 +262,7 @@ Document URIs are automatically derived from your git repository:
 **Tracked index files** (recommended for teams):
 ```bash
 # Add to git for team sharing
-git add .asta/index.yaml
+git add .asta/documents/index.yaml
 git commit -m "Add research papers to index"
 git push
 ```
@@ -272,7 +274,7 @@ When your team pulls the changes, they'll have:
 - ✅ URIs work after merging between branches
 
 **Untracked index files** (personal use):
-- The `.gitignore` allows `.asta/index.yaml` but ignores other `.asta/` files
+- The `.gitignore` allows `.asta/documents/index.yaml` but ignores other `.asta/` files
 - If not committed, the index is local-only to your machine
 - URIs still use git-based namespaces but aren't portable across machines
 - Useful for personal bookmarks you don't want to share
@@ -339,9 +341,9 @@ uv run asta-index add https://github.com/user/repo/blob/main/DESIGN.md \
 
 ### Team Collaboration
 
-Commit `.asta/index.yaml` to git to share with your team:
+Commit `.asta/documents/index.yaml` to git to share with your team:
 ```bash
-git add .asta/index.yaml
+git add .asta/documents/index.yaml
 git commit -m "Add ML papers to research index"
 git push
 ```
@@ -350,7 +352,7 @@ git push
 
 ### Index File Location
 
-The index is always stored at `.asta/index.yaml` relative to your current directory.
+The index is always stored at `.asta/documents/index.yaml` relative to your current directory.
 
 To use separate indexes for different projects:
 ```bash
@@ -363,7 +365,7 @@ cd ~/personal-project
 uv run asta-index list
 ```
 
-Each directory gets its own `.asta/index.yaml` file.
+Each directory gets its own `.asta/documents/index.yaml` file.
 
 ### Allowed MIME Types
 
@@ -421,11 +423,10 @@ make code-check
 
 ## Links
 
-- **MCP Setup**: [MCP_SETUP.md](MCP_SETUP.md)
+- **Asta Skill**: `.claude/commands/asta-documents.md` (recommended for Claude Code)
 - **Development Guide**: [CLAUDE.md](CLAUDE.md)
+- **MCP Setup** (deprecated): [MCP_SETUP.md](MCP_SETUP.md)
 - **Chatbot Usage**: [README_CHATBOT.md](README_CHATBOT.md)
-- **Model Context Protocol**: https://modelcontextprotocol.io/
-- **Claude Desktop**: https://claude.ai/download
 - **Beads Issue Tracker**: https://github.com/steveyegge/beads
 
 ## License

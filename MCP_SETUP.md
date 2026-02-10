@@ -1,6 +1,12 @@
 # MCP Server Setup Guide
 
-Complete setup instructions for configuring the Asta Resource Repository MCP server with Claude Code or Claude Desktop.
+> **⚠️ DEPRECATED**: The MCP server integration is deprecated. Use the **Asta Documents skill** (`.claude/commands/asta-documents.md`) instead for Claude Code. The skill provides all MCP functionality via the CLI without requiring MCP server configuration.
+>
+> This file is kept for reference only.
+
+---
+
+Complete setup instructions for configuring the Asta Resource Repository MCP server with Claude Code or Claude Desktop (deprecated approach).
 
 ## Prerequisites
 
@@ -140,7 +146,7 @@ Search for documents about transformers
 
 The document metadata index is stored at:
 ```
-<repository-path>/.asta/index.yaml
+<repository-path>/.asta/documents/index.yaml
 ```
 
 This file is:
@@ -150,7 +156,7 @@ This file is:
 
 You can view it directly:
 ```bash
-cat .asta/index.yaml
+cat .asta/documents/index.yaml
 ```
 
 Or use the CLI:

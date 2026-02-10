@@ -34,20 +34,20 @@ logger = logging.getLogger(__name__)
 class LocalIndexDocumentStore(DocumentStore):
     """Document store that maintains a local YAML index of document metadata
 
-    Stores only metadata (no content) in a git-friendly YAML file at .asta/index.yaml
+    Stores only metadata (no content) in a git-friendly YAML file at .asta/documents/index.yaml
     Designed for single-user, local-only usage with zero external dependencies.
     """
 
     def __init__(
         self,
-        index_path: str = ".asta/index.yaml",
+        index_path: str = ".asta/documents/index.yaml",
         enable_cache: bool = True,
         enable_embeddings: bool = True,
     ):
         """Initialize the local index document store
 
         Args:
-            index_path: Path to the YAML index file (default: ".asta/index.yaml")
+            index_path: Path to the YAML index file (default: ".asta/documents/index.yaml")
             enable_cache: Enable SQLite search cache for fast FTS5 search (default: True)
             enable_embeddings: Enable semantic search with embeddings (default: True, requires sentence-transformers)
 
@@ -67,7 +67,7 @@ class LocalIndexDocumentStore(DocumentStore):
         if self._initialized:
             return
 
-        # Create .asta directory if it doesn't exist
+        # Create .asta/documents directory if it doesn't exist
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Derive namespace from index file location
@@ -616,3 +616,205 @@ class LocalIndexDocumentStore(DocumentStore):
             return False
 
         return uri in self._documents
+
+    async def update(
+        self,
+        uri: str,
+        name: Optional[str] = None,
+        url: Optional[str] = None,
+        summary: Optional[str] = None,
+        mime_type: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        extra: Optional[dict] = None,
+    ) -> DocumentMetadata:
+        """Update document metadata
+
+        Args:
+            uri: Document URI
+            name: New document name (optional)
+            url: New document URL (optional)
+            summary: New summary (optional)
+            mime_type: New MIME type (optional)
+            tags: New tags list (optional)
+            extra: New extra metadata (optional)
+
+        Returns:
+            Updated document metadata
+
+        Raises:
+            ValidationError: If URI not found or update values are invalid
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Validate URI format
+        namespace, _ = parse_document_uri(uri)
+        if namespace != self.namespace:
+            raise ValidationError(
+                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
+            )
+
+        # Check if document exists
+        if uri not in self._documents:
+            raise ValidationError(f"Document not found: {uri}")
+
+        # Get existing document
+        doc = self._documents[uri]
+
+        # Update fields if provided
+        if name is not None:
+            if not name.strip():
+                raise ValidationError("Document name cannot be empty")
+            doc.name = name
+
+        if url is not None:
+            if not url.strip():
+                raise ValidationError("Document URL cannot be empty")
+            if not (url.startswith("http://") or url.startswith("https://")):
+                raise ValidationError(
+                    f"Invalid URL format: {url}. Must start with http:// or https://"
+                )
+            doc.url = url
+
+        if summary is not None:
+            if not summary.strip():
+                raise ValidationError("Document summary cannot be empty")
+            doc.summary = summary
+
+        if mime_type is not None:
+            doc.mime_type = mime_type
+
+        if tags is not None:
+            doc.tags = tags
+
+        if extra is not None:
+            doc.extra = extra
+
+        # Update modified timestamp
+        doc.modified_at = datetime.now(timezone.utc)
+
+        # Save to disk
+        self._save_index()
+
+        return doc
+
+    async def add_tags(self, uri: str, tags: list[str]) -> DocumentMetadata:
+        """Add tags to a document without replacing existing ones
+
+        Args:
+            uri: Document URI
+            tags: List of tags to add
+
+        Returns:
+            Updated document metadata
+
+        Raises:
+            ValidationError: If URI not found or tags are invalid
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Validate URI format
+        namespace, _ = parse_document_uri(uri)
+        if namespace != self.namespace:
+            raise ValidationError(
+                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
+            )
+
+        # Check if document exists
+        if uri not in self._documents:
+            raise ValidationError(f"Document not found: {uri}")
+
+        # Get existing document
+        doc = self._documents[uri]
+
+        # Add new tags without duplicates
+        existing_tags = set(doc.tags or [])
+        new_tags = set(tags)
+        doc.tags = sorted(existing_tags | new_tags)
+
+        # Update modified timestamp
+        doc.modified_at = datetime.now(timezone.utc)
+
+        # Save to disk
+        self._save_index()
+
+        return doc
+
+    async def remove_tags(self, uri: str, tags: list[str]) -> DocumentMetadata:
+        """Remove specific tags from a document
+
+        Args:
+            uri: Document URI
+            tags: List of tags to remove
+
+        Returns:
+            Updated document metadata
+
+        Raises:
+            ValidationError: If URI not found
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Validate URI format
+        namespace, _ = parse_document_uri(uri)
+        if namespace != self.namespace:
+            raise ValidationError(
+                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
+            )
+
+        # Check if document exists
+        if uri not in self._documents:
+            raise ValidationError(f"Document not found: {uri}")
+
+        # Get existing document
+        doc = self._documents[uri]
+
+        # Remove specified tags
+        existing_tags = set(doc.tags or [])
+        tags_to_remove = set(tags)
+        doc.tags = sorted(existing_tags - tags_to_remove)
+
+        # Update modified timestamp
+        doc.modified_at = datetime.now(timezone.utc)
+
+        # Save to disk
+        self._save_index()
+
+        return doc
+
+    async def get_documents_by_tags(
+        self, tags: list[str], match_all: bool = False
+    ) -> list[DocumentMetadata]:
+        """Get all documents that have specific tags
+
+        Args:
+            tags: List of tags to filter by
+            match_all: If True, require all tags; if False, require any tag (default: False)
+
+        Returns:
+            List of documents matching the tag criteria
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        filter_tags = set(tags)
+        results = []
+
+        for doc in self._documents.values():
+            if not doc.tags:
+                continue
+
+            doc_tags = set(doc.tags)
+
+            if match_all:
+                # All specified tags must be present
+                if filter_tags.issubset(doc_tags):
+                    results.append(doc)
+            else:
+                # Any of the specified tags must be present
+                if filter_tags & doc_tags:
+                    results.append(doc)
+
+        return results
