@@ -87,12 +87,6 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 - `modified_at`: Auto-updated on changes
 - `extra`: Dict for additional metadata (author, year, venue, etc.)
 
-**Removed from previous versions:**
-- ~~`content`~~ - Never stored locally
-- ~~`size`~~ - Not relevant without content storage
-- ~~`owner_uri`~~ - Single-user model
-- ~~`resource_type`~~ - Removed from URI format for simplicity
-
 ### Index File Structure
 
 The `.asta/documents/index.yaml` file contains:
@@ -859,11 +853,9 @@ The CLI converts exceptions to user-friendly error messages.
 ## Important Notes
 
 - **Always use `uv run`**: This project uses `uv` for dependency management
-- **No External Dependencies**: Zero runtime dependencies except Python stdlib + YAML parser
 - **URI Format**: All document URIs follow `asta://{namespace}/{uuid}` where namespace is auto-derived from git
 - **Namespace Derivation**: Automatic from git repo (no configuration needed)
 - **Git-Friendly**: `.asta/documents/index.yaml` should be committed for team sharing
-- **Branch Isolation**: Each git branch gets its own namespace (intentional design)
 - **Async/Await**: All document store operations are async for future extensibility
 - **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
 
