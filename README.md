@@ -26,88 +26,24 @@ This tool helps you and your AI agents keep track of documents by storing **meta
 uv tool install git+https://github.com/allenai/asta-resource-repo.git
 ```
 
-This installs the `asta-documents` CLI globally with all features including semantic search. The semantic search model (~80MB) downloads automatically on first use.
+This installs the `asta-documents` CLI globally.
 
-## Quick Start with Claude Code
+## Skill Installation
 
-### Using the Asta Skill
+The [asta-documents](skills/asta-documents/SKILL.md) skill provides agent instructions for using the `asta-documents` CLI.
 
-The Asta skill (`/asta-documents`) provides complete document management via the CLI. No MCP server configuration needed!
-
-**Usage:**
-```
-💬 "Use /asta-documents to add a paper at https://arxiv.org/pdf/1706.03762.pdf
-    about Transformers, tags: ai, research, nlp"
-
-💬 "Use /asta-documents to search for papers about attention mechanisms"
-
-💬 "Use /asta-documents to list all documents tagged with research"
-
-💬 "Use /asta-documents to fetch asta://namespace/uuid"
-```
-
-**The skill handles all operations:**
-- Add, update, remove documents
-- Search with multiple modes (keyword, semantic, hybrid)
-- Fetch document content with automatic caching
-- Manage tags and metadata
-- List and filter documents
-
-**Install the skill:**
+**Claude Code:**
 ```bash
-curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/allenai/asta-resource-repo/main/skills/asta-documents.md
+curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/allenai/asta-resource-repo/main/skills/asta-documents/SKILL.md
 ```
 
-See `skills/asta-documents.md` in this repository for complete documentation.
-
-## Advanced Search
-
-Asta includes a sophisticated search system with multiple modes optimized for different use cases:
-
-### Search Modes
-
-**🤖 Auto Mode** (default)
-- Automatically selects the best available search method
-- No configuration needed—just works!
-
-**⚡ Simple Mode**
-- Basic substring matching
-- Fastest, no dependencies
-- Good for exact phrase matching
-
-**🎯 Keyword Mode** (BM25)
-- Industry-standard BM25 ranking algorithm
-- Best for exact keyword matches
-- Fast indexed search (~80ms for 5K documents)
-- Automatically available (no extra setup)
-
-**🧠 Semantic Mode** (Embeddings)
-- Understands meaning and concepts, not just keywords
-- Best for natural language queries like "papers about attention mechanisms"
-- Uses sentence-transformers for offline AI embeddings (~80MB model download on first use)
-
-**🚀 Hybrid Mode** (BM25 + Semantic)
-- Combines keyword precision with semantic understanding
-- Best overall relevance (~80-85% precision@10)
-- Uses Reciprocal Rank Fusion to merge results
-
-The semantic search model (`all-MiniLM-L6-v2`, ~80MB) downloads automatically on first use.
-
-### Performance
-
-Tested with 5K documents:
-- Simple: ~150ms (linear scan)
-- Keyword (BM25): ~80ms (indexed)
-- Semantic: ~120ms (with embeddings)
-- Hybrid: ~150ms (best results)
-
-All modes run locally with no external API calls.
-
+**skills.sh:**
+```bash
+npx skills add add allenai/asta-resource-repo/skills
+```
 ## Command Line Usage
 
 After installation, use the `asta-documents` CLI:
-
-> **Note:** If you're developing locally (cloned repo), use `uv run asta-documents` instead.
 
 ### Add a Document
 
@@ -139,51 +75,32 @@ asta-documents list --json
 ### Search Documents
 
 ```bash
-# Auto mode (uses best available method)
 asta-documents search "transformer architecture"
 
-# Keyword search with scores
-asta-documents search "neural networks" --mode=keyword --show-scores
-
-# Semantic search (requires installation with --with sentence-transformers)
-asta-documents search "papers about attention mechanisms" --mode=semantic
-
-# Hybrid search for best results
-asta-documents search "deep learning" --mode=hybrid --show-scores
-
-# See all options
-asta-documents search --help
+The `--mode` option allows you to choose the search method. See `--help` for details.
 ```
-
-**Search mode options:**
-- `--mode=auto` - Auto-select best available (default)
-- `--mode=simple` - Fast substring matching
-- `--mode=keyword` - BM25 keyword ranking
-- `--mode=semantic` - AI embeddings (requires sentence-transformers)
-- `--mode=hybrid` - Combined BM25 + semantic (requires sentence-transformers)
-- `--show-scores` - Display relevance scores
 
 ### Get Document Details
 
 ```bash
-asta-documents get asta://owner/repo/UUID
+asta-documents get asta://{namespace}/{uuid}
 ```
 
 ### Update Document Metadata
 
 ```bash
 # Update single field
-asta-documents update asta://owner/repo/UUID \
+asta-documents update asta://{namespace}/{uuid} \
   --name="Updated Title"
 
 # Update multiple fields
-asta-documents update asta://owner/repo/UUID \
+asta-documents update asta://{namespace}/{uuid} \
   --name="New Title" \
   --summary="Updated summary" \
   --tags="revised,updated"
 
 # Update with JSON output
-asta-documents --json update asta://owner/repo/UUID \
+asta-documents --json update asta://{namespace}/{uuid} \
   --tags="new,tags"
 ```
 
@@ -198,7 +115,7 @@ asta-documents --json update asta://owner/repo/UUID \
 ### Remove Document
 
 ```bash
-asta-documents remove asta://owner/repo/UUID
+asta-documents remove asta://{namespace}/{uuid}
 ```
 
 ### Show Index Stats
@@ -211,7 +128,8 @@ asta-documents show
 
 ### Index File
 
-All metadata is stored in `.asta/documents/index.yaml`:
+All metadata is stored in `.asta/documents/index.yaml`, in the current directory.
+This file can be copied and shared across projects. The structure is simple YAML:
 
 ```yaml
 version: "1.0"
@@ -231,7 +149,11 @@ documents:
 
 ### Namespaces and URIs
 
-Document URIs are automatically derived from your git repository:
+Document URIs are of the form `asta://{namespace}/{uuid}`. The `namespace` 
+points to the location of the `index.yaml file`. If the current directory is part of a
+local git workspace, the `namespace` will be the repo id, i.e. `{owner}/{repo}`. 
+Outside of a git context, the `namespace` is a pointer to the local filesystem.
+Thus, `asta://` URLs are shareable only so long as the index file is checked into git.
 
 **In a git repository:**
 - Format: `asta://{owner}/{repo}/{uuid}`
@@ -287,8 +209,8 @@ Each document has:
 
 ### Why Metadata Only?
 
-1. **Small and fast**: No large files in git, instant search
-2. **No copyright issues**: Metadata is fair use
+1. **Small and fast**: No large files in git, quick search
+2. **No copyright issues**: Content stays local. Metadata is fair use.
 3. **Portable**: Works with any URL-accessible content
 4. **Flexible**: Content can move, metadata stays stable
 5. **Git-friendly**: Track changes in readable YAML diffs
@@ -335,39 +257,6 @@ git commit -m "Add ML papers to research index"
 git push
 ```
 
-## Configuration
-
-### Index File Location
-
-The index is always stored at `.asta/documents/index.yaml` relative to your current directory.
-
-To use separate indexes for different projects:
-```bash
-# Work project
-cd ~/work-project
-asta-documents list
-
-# Personal project
-cd ~/personal-project
-asta-documents list
-```
-
-Each directory gets its own `.asta/documents/index.yaml` file.
-
-### Allowed MIME Types
-
-Edit `src/asta/resources/config/local.conf` to customize allowed document types:
-
-```hocon
-allowed_mime_types = [
-  "application/json",
-  "application/pdf",
-  "text/plain",
-  "text/markdown",
-  "text/html"
-]
-```
-
 ## Troubleshooting
 
 ### "Command not found: uv"
@@ -406,7 +295,7 @@ make code-check
 
 ## Links
 
-- **Asta Skill**: [skills/asta-documents.md](skills/asta-documents.md) (install for Claude Code)
+- **Asta-Documents Skill**: [skills/asta-documents/SKILL.md](skills/asta-documents/SKILL.md)
 - **Development Guide**: [CLAUDE.md](CLAUDE.md)
 - **Beads Issue Tracker**: https://github.com/steveyegge/beads
 
