@@ -11,12 +11,11 @@ license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp~=2.12",
     "pydantic~=2.11",
     "pyhocon~=0.3",
-    "anthropic~=0.39",
-    "mcp~=1.2",
     "pyyaml~=6.0",
+    "sentence-transformers>=2.2.0",
+    "numpy>=1.21.0",
 ]
 
 [project.optional-dependencies]
@@ -27,24 +26,14 @@ dev = [
     "pytest-asyncio~=0.24",
     "httpx~=0.28",
     "requests~=2.32",
-    "mcp[cli]~=1.15",
-]
-search = [
-    "sentence-transformers>=2.2.0",
-    "numpy>=1.21.0",
-]
-chatbot = [
-    "anthropic~=0.39",
-    "mcp~=1.2",
 ]
 
 [project.scripts]
-asta-index = "asta.resources.cli.index_cli:main"
-asta-resources-chatbot = "asta.resources.cli.chatbot:main"
+asta-documents = "asta.resources.cli.index_cli:main"
 
 [project.urls]
-Homepage = "https://github.com/example/asta-resource-repository"
-Repository = "https://github.com/example/asta-resource-repository"
+Homepage = "https://github.com/allenai/asta-resource-repo"
+Repository = "https://github.com/allenai/asta-resource-repo"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -54,3 +43,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "asta.resources.config" = ["*.conf"]
+"asta.resources.document_store" = ["*.sql"]

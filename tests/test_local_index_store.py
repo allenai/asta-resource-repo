@@ -194,7 +194,8 @@ async def test_search_by_name(store):
     await store.store(doc1)
     await store.store(doc2)
 
-    results = await store.search("Python")
+    # Use keyword search to test exact matching (not semantic)
+    results = await store.search("Python", search_mode="keyword")
     assert len(results) == 1
     assert results[0].result.name == "Python Programming"
 
@@ -287,7 +288,8 @@ async def test_search_no_matches(store):
 
     await store.store(doc)
 
-    results = await store.search("Rust programming")
+    # Use keyword search to test exact matching (semantic might find related programming languages)
+    results = await store.search("Rust programming", search_mode="keyword")
     assert len(results) == 0
 
 
@@ -581,10 +583,12 @@ async def test_search_mode_auto_selects_fts5(store):
 
     await store.store(doc)
 
-    # Auto mode should select FTS5 if cache is available
+    # Auto mode should select hybrid if embeddings are available, otherwise FTS5
     selected_mode = store._determine_search_mode()
-    if store._search_cache and store._search_cache._initialized:
-        assert selected_mode == "fts5"
+    if store._embedding_manager:
+        assert selected_mode == "hybrid"
+    elif store._search_cache and store._search_cache._initialized:
+        assert selected_mode == "bm25"
     else:
         assert selected_mode == "simple"
 

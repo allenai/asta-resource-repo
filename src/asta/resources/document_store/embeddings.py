@@ -44,17 +44,13 @@ class EmbeddingManager:
 
         if not EMBEDDINGS_AVAILABLE:
             logger.warning(
-                "sentence-transformers not installed. Semantic search unavailable. "
-                "Install with: uv sync --extra search"
+                "sentence-transformers not available. Semantic search unavailable."
             )
 
     def _load_model(self):
         """Lazy load the sentence-transformers model"""
         if not EMBEDDINGS_AVAILABLE:
-            raise ImportError(
-                "sentence-transformers not installed. "
-                "Install with: uv sync --extra search"
-            )
+            raise ImportError("sentence-transformers not available.")
 
         if self._model is None:
             logger.info(f"Loading embedding model: {self.model_name}")

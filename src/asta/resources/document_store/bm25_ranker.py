@@ -175,6 +175,12 @@ class BM25Ranker:
         row = cursor.fetchone()
         avg_length_tags = float(row[0]) if row else 1.0
 
+        cursor.execute(
+            "SELECT value FROM collection_stats WHERE key = 'avg_length_extra'"
+        )
+        row = cursor.fetchone()
+        avg_length_extra = float(row[0]) if row else 1.0
+
         # Calculate scores for all documents
         doc_scores: Dict[str, float] = {}
 
@@ -211,6 +217,8 @@ class BM25Ranker:
                     avg_length = avg_length_summary
                 elif field == "tags":
                     avg_length = avg_length_tags
+                elif field == "extra":
+                    avg_length = avg_length_extra
                 else:
                     avg_length = 1.0
 

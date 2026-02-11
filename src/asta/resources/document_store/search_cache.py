@@ -258,6 +258,7 @@ class SearchCache:
         total_length_name = 0
         total_length_summary = 0
         total_length_tags = 0
+        total_length_extra = 0
         total_length_total = 0
 
         for uri, doc in documents.items():
@@ -327,19 +328,28 @@ class SearchCache:
             length_name = len(name_terms)
             length_summary = len(summary_terms)
             length_tags = len(tags_terms)
-            length_total = length_name + length_summary + length_tags
+            length_extra = len(extra_terms) if doc.extra else 0
+            length_total = length_name + length_summary + length_tags + length_extra
 
             self.conn.execute(
                 """
-                INSERT INTO document_stats (uri, length_name, length_summary, length_tags, length_total)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO document_stats (uri, length_name, length_summary, length_tags, length_extra, length_total)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (uri, length_name, length_summary, length_tags, length_total),
+                (
+                    uri,
+                    length_name,
+                    length_summary,
+                    length_tags,
+                    length_extra,
+                    length_total,
+                ),
             )
 
             total_length_name += length_name
             total_length_summary += length_summary
             total_length_tags += length_tags
+            total_length_extra += length_extra
             total_length_total += length_total
 
         # Insert term statistics
@@ -357,6 +367,7 @@ class SearchCache:
         avg_length_name = total_length_name / num_docs if num_docs > 0 else 0
         avg_length_summary = total_length_summary / num_docs if num_docs > 0 else 0
         avg_length_tags = total_length_tags / num_docs if num_docs > 0 else 0
+        avg_length_extra = total_length_extra / num_docs if num_docs > 0 else 0
         avg_length_total = total_length_total / num_docs if num_docs > 0 else 0
 
         stats = [
@@ -364,6 +375,7 @@ class SearchCache:
             ("avg_length_name", avg_length_name),
             ("avg_length_summary", avg_length_summary),
             ("avg_length_tags", avg_length_tags),
+            ("avg_length_extra", avg_length_extra),
             ("avg_length_total", avg_length_total),
         ]
 

@@ -403,7 +403,7 @@ async def cmd_show(args: argparse.Namespace):
 
 def get_cache_dir() -> Path:
     """Get the cache directory path."""
-    return Path(".asta/cache")
+    return Path(".asta/documents/cache")
 
 
 def compute_url_hash(url: str) -> str:
@@ -792,63 +792,71 @@ async def cmd_fetch(args: argparse.Namespace):
 
 
 def main():
-    """Main entry point for asta-index CLI"""
+    """Main entry point for asta-documents CLI"""
+    # Create a parent parser with shared arguments for subcommands
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output in JSON format",
+    )
+
     parser = argparse.ArgumentParser(
         description="Manage the local document metadata index",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # List all documents
-  asta-index list
+  asta-documents list
 
   # List documents with specific tags
-  asta-index list --tags="ai,research"
+  asta-documents list --tags="ai,research"
 
   # Add a document
-  asta-index add https://arxiv.org/pdf/1706.03762.pdf \\
+  asta-documents add https://arxiv.org/pdf/1706.03762.pdf \\
     --name="Attention Is All You Need" \\
     --summary="Transformer architecture paper" \\
     --tags="ai,research,transformers" \\
     --mime-type="application/pdf"
 
   # Search documents
-  asta-index search "transformer"
+  asta-documents search "transformer"
 
   # Get specific document
-  asta-index get asta://owner/repo/UUID
+  asta-documents get asta://owner/repo/UUID
 
   # Update document metadata
-  asta-index update asta://owner/repo/UUID \\
+  asta-documents update asta://owner/repo/UUID \\
     --name="New Title" \\
     --tags="ai,updated"
 
   # Remove document
-  asta-index remove asta://owner/repo/UUID
+  asta-documents remove asta://owner/repo/UUID
 
   # Add tags to a document
-  asta-index add-tags asta://owner/repo/UUID --tags="ai,updated"
+  asta-documents add-tags asta://owner/repo/UUID --tags="ai,updated"
 
   # Remove tags from a document
-  asta-index remove-tags asta://owner/repo/UUID --tags="old,deprecated"
+  asta-documents remove-tags asta://owner/repo/UUID --tags="old,deprecated"
 
   # List documents by tags (any tag matches)
-  asta-index list-by-tags --tags="ai,ml"
+  asta-documents list-by-tags --tags="ai,ml"
 
   # List documents by tags (all tags must match)
-  asta-index list-by-tags --tags="ai,research" --match-all
+  asta-documents list-by-tags --tags="ai,research" --match-all
 
   # Show index information
-  asta-index show
+  asta-documents show
 
   # Fetch document content (with caching)
-  asta-index fetch asta://owner/repo/UUID -o document.pdf
+  asta-documents fetch asta://owner/repo/UUID -o document.pdf
 
   # Cache management
-  asta-index cache list            # List cached items
-  asta-index cache stats           # Show statistics
-  asta-index cache clean --days 7  # Remove old items
-  asta-index cache clear           # Remove all cache
-  asta-index cache info <hash>     # Show item details
+  asta-documents cache list            # List cached items
+  asta-documents cache stats           # Show statistics
+  asta-documents cache clean --days 7  # Remove old items
+  asta-documents cache clear           # Remove all cache
+  asta-documents cache info <hash>     # Show item details
 """,
     )
 
@@ -856,7 +864,7 @@ Examples:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Output in JSON format",
+        help="Output in JSON format (can appear anywhere in command)",
     )
     parser.add_argument(
         "--index-path",
@@ -867,7 +875,9 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # list command
-    list_parser = subparsers.add_parser("list", help="List all documents")
+    list_parser = subparsers.add_parser(
+        "list", help="List all documents", parents=[parent_parser]
+    )
     list_parser.add_argument(
         "--tags",
         help="Filter by tags (comma-separated)",
@@ -881,7 +891,9 @@ Examples:
     list_parser.set_defaults(func=cmd_list)
 
     # add command
-    add_parser = subparsers.add_parser("add", help="Add a new document")
+    add_parser = subparsers.add_parser(
+        "add", help="Add a new document", parents=[parent_parser]
+    )
     add_parser.add_argument("url", help="URL where document is located")
     add_parser.add_argument("--name", required=True, help="Document name/title")
     add_parser.add_argument(
@@ -903,12 +915,16 @@ Examples:
     add_parser.set_defaults(func=cmd_add)
 
     # get command
-    get_parser = subparsers.add_parser("get", help="Get document by URI")
+    get_parser = subparsers.add_parser(
+        "get", help="Get document by URI", parents=[parent_parser]
+    )
     get_parser.add_argument("uri", help="Document URI")
     get_parser.set_defaults(func=cmd_get)
 
     # search command
-    search_parser = subparsers.add_parser("search", help="Search documents")
+    search_parser = subparsers.add_parser(
+        "search", help="Search documents", parents=[parent_parser]
+    )
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument(
         "--limit",
@@ -936,7 +952,9 @@ Examples:
     search_parser.set_defaults(func=cmd_search)
 
     # update command
-    update_parser = subparsers.add_parser("update", help="Update document metadata")
+    update_parser = subparsers.add_parser(
+        "update", help="Update document metadata", parents=[parent_parser]
+    )
     update_parser.add_argument("uri", help="Document URI to update")
     update_parser.add_argument("--name", help="New document name")
     update_parser.add_argument("--url", help="New document URL")
@@ -951,12 +969,16 @@ Examples:
     update_parser.set_defaults(func=cmd_update)
 
     # remove command
-    remove_parser = subparsers.add_parser("remove", help="Remove document by URI")
+    remove_parser = subparsers.add_parser(
+        "remove", help="Remove document by URI", parents=[parent_parser]
+    )
     remove_parser.add_argument("uri", help="Document URI to remove")
     remove_parser.set_defaults(func=cmd_remove)
 
     # add-tags command
-    add_tags_parser = subparsers.add_parser("add-tags", help="Add tags to a document")
+    add_tags_parser = subparsers.add_parser(
+        "add-tags", help="Add tags to a document", parents=[parent_parser]
+    )
     add_tags_parser.add_argument("uri", help="Document URI")
     add_tags_parser.add_argument(
         "--tags", required=True, help="Tags to add (comma-separated)"
@@ -965,7 +987,7 @@ Examples:
 
     # remove-tags command
     remove_tags_parser = subparsers.add_parser(
-        "remove-tags", help="Remove tags from a document"
+        "remove-tags", help="Remove tags from a document", parents=[parent_parser]
     )
     remove_tags_parser.add_argument("uri", help="Document URI")
     remove_tags_parser.add_argument(
@@ -975,7 +997,7 @@ Examples:
 
     # list-by-tags command
     list_by_tags_parser = subparsers.add_parser(
-        "list-by-tags", help="List documents by tags"
+        "list-by-tags", help="List documents by tags", parents=[parent_parser]
     )
     list_by_tags_parser.add_argument(
         "--tags", required=True, help="Tags to filter by (comma-separated)"
@@ -994,7 +1016,9 @@ Examples:
     list_by_tags_parser.set_defaults(func=cmd_list_by_tags)
 
     # show command
-    show_parser = subparsers.add_parser("show", help="Show index information")
+    show_parser = subparsers.add_parser(
+        "show", help="Show index information", parents=[parent_parser]
+    )
     show_parser.set_defaults(func=cmd_show)
 
     # fetch command
@@ -1024,12 +1048,14 @@ Examples:
     )
 
     # cache list
-    cache_list_parser = cache_subparsers.add_parser("list", help="List cached items")
+    cache_list_parser = cache_subparsers.add_parser(
+        "list", help="List cached items", parents=[parent_parser]
+    )
     cache_list_parser.set_defaults(func=cmd_cache_list)
 
     # cache stats
     cache_stats_parser = cache_subparsers.add_parser(
-        "stats", help="Show cache statistics"
+        "stats", help="Show cache statistics", parents=[parent_parser]
     )
     cache_stats_parser.set_defaults(func=cmd_cache_stats)
 
@@ -1062,13 +1088,19 @@ Examples:
 
     # cache info
     cache_info_parser = cache_subparsers.add_parser(
-        "info", help="Show cached item details"
+        "info", help="Show cached item details", parents=[parent_parser]
     )
     cache_info_parser.add_argument("hash", help="Cache hash (directory name)")
     cache_info_parser.set_defaults(func=cmd_cache_info)
 
     # Parse arguments
     args = parser.parse_args()
+
+    # Handle --json appearing anywhere in command line
+    # If --json appears before the subcommand, the subparser's default value (False)
+    # overwrites the main parser's value (True), so we need to check sys.argv directly
+    if "--json" in sys.argv:
+        args.json = True
 
     if not args.command:
         parser.print_help()
