@@ -5,6 +5,9 @@ description: Local document metadata index for scientific documents
 
 # Asta Documents Management
 
+Use this skill when the user asks to store a document "in Asta" or retrieve "from Asta". Use it when the
+user references an "Asta document" or anything with an `asta://` URI.
+
 This skill provides complete document management functionality for tracking research papers, documentation, and resources using the `asta-documents` CLI.
 
 **What it does:** Track document metadata (URLs, summaries, tags) in a local git-friendly YAML file. Think of it as a smart bookmark manager with powerful search capabilities.
