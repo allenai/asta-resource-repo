@@ -5,7 +5,7 @@ This directory contains the test suite for asta-resource-repository, a lightweig
 ## Test Structure
 
 ### LocalIndexDocumentStore Tests
-- `test_local_index_store.py` - Complete test suite for YAML-based document metadata storage (23 tests)
+- `test_local_index_store.py` - Complete test suite for YAML-based document metadata storage (61 tests)
   - Document CRUD operations (create, read, update, delete)
   - Search functionality across name, summary, tags, and extra fields
   - Validation (URL format, required fields)
@@ -78,7 +78,7 @@ uv run pytest tests/test_local_index_store.py \
 - List all documents
 
 **Validation:**
-- URL format validation (must start with http:// or https://)
+- URL format validation (must include protocol scheme: http://, https://, file://)
 - Required field validation (summary, URL)
 - Namespace validation
 - URI format validation
@@ -207,14 +207,17 @@ jobs:
 
 ## Test Statistics
 
-- **LocalIndexDocumentStore Tests**: 23 tests
+- **LocalIndexDocumentStore Tests**: 61 tests
 - **Test Categories**:
   - CRUD operations: 8 tests
-  - Validation: 4 tests
-  - Search: 7 tests
-  - Persistence: 2 tests
-  - Edge cases: 2 tests
-- **Execution time**: < 1 second
+  - Validation: 6 tests (including various URL protocol tests)
+  - Search: 14 tests (simple, FTS5, BM25, ranking)
+  - Tag operations: 11 tests
+  - Persistence: 4 tests
+  - Edge cases: 5 tests
+  - Cache sync: 3 tests
+  - Update operations: 10 tests
+- **Execution time**: ~20 seconds
 - **Coverage**: ~95% of local_index.py
 
 ## Migration from Previous Versions

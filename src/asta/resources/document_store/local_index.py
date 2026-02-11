@@ -214,11 +214,9 @@ class LocalIndexDocumentStore(DocumentStore):
         # Validate URL format
         if not document.url:
             raise ValidationError("Document URL is required")
-        if not (
-            document.url.startswith("http://") or document.url.startswith("https://")
-        ):
+        if "://" not in document.url:
             raise ValidationError(
-                f"Invalid URL format: {document.url}. Must start with http:// or https://"
+                f"Invalid URL format: {document.url}. Must include a protocol scheme (e.g., http://, https://, file://, s3://, gs://)"
             )
 
         # Validate required fields
@@ -666,9 +664,9 @@ class LocalIndexDocumentStore(DocumentStore):
         if url is not None:
             if not url.strip():
                 raise ValidationError("Document URL cannot be empty")
-            if not (url.startswith("http://") or url.startswith("https://")):
+            if "://" not in url:
                 raise ValidationError(
-                    f"Invalid URL format: {url}. Must start with http:// or https://"
+                    f"Invalid URL format: {url}. Must include a protocol scheme (e.g., http://, https://, file://)"
                 )
             doc.url = url
 

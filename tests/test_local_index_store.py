@@ -80,6 +80,33 @@ async def test_store_validates_url(store):
 
 
 @pytest.mark.asyncio
+async def test_store_accepts_various_url_protocols(store):
+    """Test that store accepts various URL protocols"""
+    protocols = [
+        "http://example.com/doc.pdf",
+        "https://example.com/doc.pdf",
+        "file:///path/to/document.pdf",
+    ]
+
+    for i, url in enumerate(protocols):
+        doc = DocumentMetadata(
+            uri="",
+            name=f"Test Document {i}",
+            url=url,
+            summary=f"Test document with {url.split('://')[0]} protocol",
+            mime_type="application/pdf",
+        )
+
+        # Should not raise ValidationError
+        uri = await store.store(doc)
+        assert uri.startswith("asta://")
+
+        # Verify it was stored correctly
+        retrieved = await store.get(uri)
+        assert retrieved.url == url
+
+
+@pytest.mark.asyncio
 async def test_store_requires_summary(store):
     """Test that store requires summary field"""
     doc = DocumentMetadata(
@@ -922,6 +949,34 @@ async def test_update_validates_url_format(store):
 
     with pytest.raises(ValidationError, match="Invalid URL format"):
         await store.update(uri, url="not-a-valid-url")
+
+
+@pytest.mark.asyncio
+async def test_update_accepts_various_url_protocols(store):
+    """Test that update accepts various URL protocols"""
+    doc = DocumentMetadata(
+        uri="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    protocols = [
+        "http://example.com/new.pdf",
+        "file:///path/to/new.pdf",
+    ]
+
+    for url in protocols:
+        # Should not raise ValidationError
+        updated = await store.update(uri, url=url)
+        assert updated.url == url
+
+        # Verify persistence
+        retrieved = await store.get(uri)
+        assert retrieved.url == url
 
 
 @pytest.mark.asyncio

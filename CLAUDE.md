@@ -75,7 +75,7 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 ### DocumentMetadata Fields
 
 **Required fields:**
-- `url`: Where the actual document content lives (HTTP/HTTPS URL)
+- `url`: Where the actual document content lives (supported protocols: `http://`, `https://`, `file://`)
 - `name`: Document title/name
 - `summary`: Text description for search (required for all documents)
 - `mime_type`: Document MIME type (e.g., `application/pdf`, `text/plain`)
