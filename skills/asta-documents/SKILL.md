@@ -1,13 +1,6 @@
 ---
-description: Manage documents in the Asta repository using the CLI
-aliases:
-  - asta
-  - asta-docs
-  - docs
-  - fetch-asta-content
-  - read-asta-doc
-  - get-asta-content
-  - show-asta-doc
+name: asta-documents
+description: Local document metadata index for scientific documents
 ---
 
 # Asta Documents Management
