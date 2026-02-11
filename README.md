@@ -26,13 +26,7 @@ This tool helps you and your AI agents keep track of documents by storing **meta
 uv tool install git+https://github.com/allenai/asta-resource-repo.git
 ```
 
-This installs the `asta-documents` CLI globally. To enable semantic search:
-
-```bash
-uv tool install --with sentence-transformers --with numpy git+https://github.com/allenai/asta-resource-repo.git
-```
-
-**Full installation guide**: [INSTALL.md](INSTALL.md)
+This installs the `asta-documents` CLI globally with all features including semantic search. The semantic search model (~80MB) downloads automatically on first use.
 
 ## Quick Start with Claude Code
 
