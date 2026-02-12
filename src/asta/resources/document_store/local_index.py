@@ -1,6 +1,5 @@
 """Local YAML-based document metadata index"""
 
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -11,10 +10,10 @@ import logging
 from ..model import (
     DocumentMetadata,
     SearchHit,
-    construct_document_uri,
     parse_document_uri,
 )
 from ..exceptions import ValidationError, DocumentServiceError
+from ..utils.short_id import generate_unique_short_id
 from .base import DocumentStore
 from .search_cache import SearchCache
 from .bm25_ranker import BM25Ranker
@@ -131,7 +130,11 @@ class LocalIndexDocumentStore(DocumentStore):
         await self.close()
 
     def _load_index(self):
-        """Load the YAML index file into memory"""
+        """Load the YAML index file into memory
+
+        Note: YAML stores only `uuid` field (not full URI). We inject
+              `_namespace` at runtime to enable URI reconstruction.
+        """
         try:
             with open(self.index_path, "r") as f:
                 # Use file locking to prevent concurrent reads during writes
@@ -156,7 +159,13 @@ class LocalIndexDocumentStore(DocumentStore):
                         doc_data["modified_at"]
                     )
 
+                # Create document metadata
                 doc = DocumentMetadata(**doc_data)
+
+                # Inject namespace for URI reconstruction
+                doc._namespace = self.namespace
+
+                # Store by full URI (reconstructed from namespace + uuid)
                 self._documents[doc.uri] = doc
 
         except Exception as e:
@@ -167,12 +176,19 @@ class LocalIndexDocumentStore(DocumentStore):
 
         Args:
             data: Optional dict to save directly (for initialization)
+
+        Note: Only `uuid` field is saved (not full URI). The `_namespace` field
+              is excluded automatically by Pydantic (private field convention).
         """
         try:
             if data is None:
                 # Convert documents to dict format for YAML
                 # model_dump() already serializes datetimes to ISO strings via field_serializer
-                docs_list = [doc.model_dump() for doc in self._documents.values()]
+                # and excludes private fields (_namespace) and computed properties (uri)
+                docs_list = [
+                    doc.model_dump(exclude_none=False)
+                    for doc in self._documents.values()
+                ]
 
                 data = {
                     "version": "1.0",
@@ -203,7 +219,7 @@ class LocalIndexDocumentStore(DocumentStore):
             document: Document metadata to store
 
         Returns:
-            Document URI
+            Document URI (full URI with namespace)
 
         Raises:
             ValidationError: If URL is invalid
@@ -223,10 +239,14 @@ class LocalIndexDocumentStore(DocumentStore):
         if not document.summary:
             raise ValidationError("Document summary is required")
 
-        # Generate UUID and URI if not provided
-        if not document.uri:
-            doc_uuid = str(uuid.uuid4())
-            document.uri = construct_document_uri(self.namespace, doc_uuid)
+        # Generate short UUID if not provided
+        if not document.uuid:
+            # Get existing UUIDs for collision checking
+            existing_uuids = {doc.uuid for doc in self._documents.values()}
+            document.uuid = generate_unique_short_id(existing_uuids)
+
+        # Inject namespace for URI reconstruction
+        document._namespace = self.namespace
 
         # Set timestamps
         now = datetime.now(timezone.utc)
@@ -234,7 +254,7 @@ class LocalIndexDocumentStore(DocumentStore):
             document.created_at = now
         document.modified_at = now
 
-        # Store in memory and save to disk
+        # Store in memory by full URI (reconstructed from namespace + uuid)
         self._documents[document.uri] = document
         self._save_index()
 

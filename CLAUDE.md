@@ -63,7 +63,8 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 7. **`model.py`**: Data models
    - `DocumentMetadata`: Metadata-only model (no content field)
    - `SearchHit`: Search result with relevance score
-   - Fields: `uri`, `name`, `url`, `summary`, `tags`, `mime_type`, `created_at`, `modified_at`, `extra`
+   - Fields: `uuid` (10-char short ID), `name`, `url`, `summary`, `tags`, `mime_type`, `created_at`, `modified_at`, `extra`
+   - Runtime field: `uri` (computed property that reconstructs full URI from namespace + uuid)
 
 8. **`config/`**: HOCON-based configuration
     - Search parameters (BM25 k1/b, field weights)
@@ -81,21 +82,27 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 - `mime_type`: Document MIME type (e.g., `application/pdf`, `text/plain`)
 - `tags`: List of tags for categorization (can be empty list)
 
-**Optional fields:**
-- `uri`: Auto-generated if not provided (`asta://{namespace}/{uuid}`)
+**Automatically managed fields:**
+- `uuid`: 10-character alphanumeric short ID (auto-generated, stored in YAML)
 - `created_at`: Auto-set on creation
 - `modified_at`: Auto-updated on changes
+
+**Runtime-only fields (not stored in YAML):**
+- `uri`: Full URI computed from namespace + uuid (format: `asta://{namespace}/{uuid}`)
+- `_namespace`: Derived from git repository, injected at runtime
+
+**Optional fields:**
 - `extra`: Dict for additional metadata (author, year, venue, etc.)
 
 ### Index File Structure
 
-The `.asta/documents/index.yaml` file contains:
+The `.asta/documents/index.yaml` file stores only the **10-character short UUID** (not the full URI):
 
 ```yaml
 version: "1.0"
 
 documents:
-  - uri: "asta://allenai/asta-resource-repo/550e8400-e29b-41d4-a716-446655440000"
+  - uuid: "6MNxGbWGRC"  # 10-char alphanumeric short ID (72% smaller than 36-char UUID)
     name: "Attention Is All You Need"
     url: "https://arxiv.org/pdf/1706.03762.pdf"
     summary: "Seminal paper introducing the Transformer architecture"
@@ -108,6 +115,48 @@ documents:
       year: 2017
       venue: "NeurIPS"
 ```
+
+**Storage format notes:**
+- Only `uuid` field is stored (not full `uri`)
+- Full URI (`asta://allenai/asta-resource-repo/6MNxGbWGRC`) is reconstructed at runtime
+- Namespace is derived from git repository location and injected into loaded documents
+- This reduces YAML file size by ~20-30% compared to storing full URIs
+
+### Short ID Implementation
+
+The system uses **10-character base62-encoded short IDs** instead of traditional 36-character UUIDs:
+
+**Format:**
+- Characters: `a-zA-Z0-9` (base62 alphabet)
+- Length: 10 characters
+- Possibilities: 62^10 ≈ 839 quadrillion unique IDs
+- Collision probability: < 0.00000006% for 10,000 documents
+
+**Generation:**
+- Location: `utils/short_id.py`
+- Uses cryptographically secure random number generation (`secrets` module)
+- Automatic collision detection with retry logic (max 10 attempts)
+- Thread-safe via existing document store locking mechanisms
+
+**Benefits:**
+- **72% reduction in UUID length** (36 chars → 10 chars)
+- **~20-30% smaller YAML files** (estimated)
+- **More readable URIs** in CLI output and git diffs
+- **URL-safe** (no special characters requiring encoding)
+
+**Example:**
+```python
+# Old format (36 chars)
+asta://namespace/550e8400-e29b-41d4-a716-446655440000
+
+# New format (10 chars)
+asta://namespace/6MNxGbWGRC
+```
+
+**URI Parsing:**
+- Location: `model.py` functions `parse_document_uri()` and `construct_document_uri()`
+- Validates 10-character alphanumeric format
+- Rejects invalid formats (wrong length, special characters, etc.)
 
 ## Search System
 
@@ -447,14 +496,14 @@ allowed_mime_types = [
 **In a git repository with remote:**
 - Format: `{owner}/{repo}`
 - Example: `allenai/asta-resource-repo`
-- URIs: `asta://allenai/asta-resource-repo/550e8400-...`
+- URIs: `asta://allenai/asta-resource-repo/6MNxGbWGRC` (10-char short ID)
 - Benefit: URIs are persistent and shareable across all team members and branches
 - URIs remain valid when merging between branches
 
 **Outside git or no remote:**
 - Format: `local:{absolute_path}`
 - Example: `local:/Users/you/project/.asta/documents/index.yaml`
-- URIs: `asta://local:/Users/you/project/.asta/documents/index.yaml/550e8400-...`
+- URIs: `asta://local:/Users/you/project/.asta/documents/index.yaml/6MNxGbWGRC` (10-char short ID)
 - Benefit: Still works without git
 
 **No branch isolation:**
@@ -917,7 +966,7 @@ uv run asta-documents search "attention"
 uv run asta-documents search "transformer" --show-scores
 
 # Update document metadata (use URI from add command output)
-uv run asta-documents update asta://allenai/asta-resource-repo/UUID \
+uv run asta-documents update asta://allenai/asta-resource-repo/6MNxGbWGRC \
   --tags="ai,nlp,transformers,updated"
 
 # View the index file directly
