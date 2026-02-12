@@ -2,17 +2,26 @@ from datetime import datetime
 from typing import Any
 import base64
 import re
-from uuid import UUID
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, field_serializer, ConfigDict
 
 from asta.resources.exceptions import ValidationError
 
 
 class DocumentMetadata(BaseModel):
-    """Document metadata for local index (no content storage)"""
+    """Document metadata for local index (no content storage)
 
-    uri: str = ""  # Full URI in format asta://{namespace}/{uuid}
+    Storage format: Only `uuid` field is serialized to YAML (not full URI)
+    Runtime format: `uri` property reconstructs full URI from namespace + uuid
+    """
+
+    model_config = ConfigDict(
+        # Don't include computed properties in serialization
+        ignored_types=(property,),
+    )
+
+    uuid: str = ""  # Short ID (10-char alphanumeric) - stored in YAML
+    _namespace: str = ""  # Derived namespace - NOT serialized, injected at runtime
     name: str | None = None
     mime_type: str
     url: str  # Where the content actually lives (required)
@@ -21,6 +30,18 @@ class DocumentMetadata(BaseModel):
     created_at: datetime | None = None
     modified_at: datetime | None = None
     extra: dict[str, Any] | None = None
+
+    @property
+    def uri(self) -> str:
+        """Reconstruct full URI from namespace and uuid
+
+        Full URI format: asta://{namespace}/{uuid}
+        This is computed at runtime and NOT stored in YAML.
+        """
+        if not self._namespace:
+            # If namespace not set, return empty (will be set during load)
+            return ""
+        return f"asta://{self._namespace}/{self.uuid}"
 
     @field_serializer("created_at", "modified_at")
     def serialize_datetime(self, dt: datetime | None) -> str | None:
@@ -105,6 +126,7 @@ def parse_document_uri(uri: str) -> tuple[str, str]:
     """Parse document URI in format asta://{namespace}/{uuid}
 
     Note: Namespace may contain slashes (e.g., owner/repo/branch)
+    UUID is a 10-character base62-encoded short ID (alphanumeric: a-zA-Z0-9)
 
     Args:
         uri: Document URI
@@ -115,28 +137,19 @@ def parse_document_uri(uri: str) -> tuple[str, str]:
     Raises:
         ValidationError: If the URI format is invalid
     """
-    # Match everything between asta:// and the last UUID-like pattern
+    # Match everything between asta:// and the last short ID pattern
     # The .+ will greedily match as much as possible (the namespace with slashes)
-    # Then backtrack to find the last / followed by a UUID
-    pattern = r"^asta://(.+)/([a-f0-9-]+)$"
-    match = re.match(pattern, uri, re.IGNORECASE)
+    # Then backtrack to find the last / followed by a 10-char alphanumeric ID
+    pattern = r"^asta://(.+)/([a-zA-Z0-9]{10})$"
+    match = re.match(pattern, uri)
 
     if not match:
         raise ValidationError(
-            f"Document URI must be in format 'asta://{{namespace}}/{{uuid}}', got: {uri}"
+            f"Document URI must be in format 'asta://{{namespace}}/{{uuid}}', got: {uri}. "
+            f"UUID must be a 10-character alphanumeric ID (a-zA-Z0-9)."
         )
 
     namespace, uuid = match.groups()
-
-    # Validate UUID format
-    try:
-        # Validate it's a valid UUID format
-        UUID(uuid)
-    except ValueError:
-        raise ValidationError(
-            f"Invalid UUID format in document URI: {uri}. "
-            f"UUID part '{uuid}' is not a valid UUID."
-        )
 
     return namespace, uuid
 
@@ -146,7 +159,7 @@ def construct_document_uri(namespace: str, uuid: str) -> str:
 
     Args:
         namespace: Namespace identifier
-        uuid: UUID string
+        uuid: Short ID string (10-character alphanumeric: a-zA-Z0-9)
 
     Returns:
         Full document URI
@@ -154,12 +167,10 @@ def construct_document_uri(namespace: str, uuid: str) -> str:
     Raises:
         ValidationError: If UUID format is invalid
     """
-    # Validate UUID format
-    try:
-        UUID(uuid)
-    except ValueError:
+    # Validate short ID format (10 chars, alphanumeric)
+    if not re.match(r"^[a-zA-Z0-9]{10}$", uuid):
         raise ValidationError(
-            f"Invalid UUID format: {uuid}. UUID must be a valid UUID."
+            f"Invalid UUID format: {uuid}. UUID must be a 10-character alphanumeric ID (a-zA-Z0-9)."
         )
 
     return f"asta://{namespace}/{uuid}"

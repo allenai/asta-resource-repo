@@ -3,11 +3,15 @@
 import pytest
 import pytest_asyncio
 import tempfile
+import yaml
 from pathlib import Path
 
 from asta.resources.document_store.local_index import LocalIndexDocumentStore
 from asta.resources.model import DocumentMetadata
 from asta.resources.exceptions import ValidationError
+
+# Test short ID constant (10-char alphanumeric)
+TEST_SHORT_ID = "abc123xyz0"
 
 
 @pytest.fixture
@@ -48,7 +52,7 @@ async def test_initialize_creates_index_file(temp_index_path):
 async def test_store_document(store):
     """Test storing a document"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -68,7 +72,7 @@ async def test_store_document(store):
 async def test_store_validates_url(store):
     """Test that store validates URL format"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="invalid-url",
         summary="A test document",
@@ -110,7 +114,7 @@ async def test_store_accepts_various_url_protocols(store):
 async def test_store_requires_summary(store):
     """Test that store requires summary field"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="",  # Empty summary
@@ -125,7 +129,7 @@ async def test_store_requires_summary(store):
 async def test_get_document(store):
     """Test retrieving a document by URI"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -149,9 +153,7 @@ async def test_get_nonexistent_document(store):
     """Test getting a document that doesn't exist"""
     from asta.resources.model import construct_document_uri
 
-    uri = construct_document_uri(
-        store.namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
     result = await store.get(uri)
     assert result is None
 
@@ -163,9 +165,7 @@ async def test_get_validates_namespace(store):
 
     # Use a different namespace than the store's
     wrong_namespace = "wrong-namespace-different-from-store"
-    uri = construct_document_uri(
-        wrong_namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
     with pytest.raises(ValidationError, match="Namespace mismatch"):
         await store.get(uri)
 
@@ -176,7 +176,7 @@ async def test_list_documents(store):
     # Add multiple documents
     docs = [
         DocumentMetadata(
-            uri="",
+            uuid="",
             name=f"Document {i}",
             url=f"https://example.com/doc{i}.pdf",
             summary=f"Document {i} summary",
@@ -204,14 +204,14 @@ async def test_list_empty_index(store):
 async def test_search_by_name(store):
     """Test searching documents by name"""
     doc1 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Python Programming",
         url="https://example.com/python.pdf",
         summary="A guide to Python",
         mime_type="application/pdf",
     )
     doc2 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="JavaScript Guide",
         url="https://example.com/js.pdf",
         summary="Learning JavaScript",
@@ -231,7 +231,7 @@ async def test_search_by_name(store):
 async def test_search_by_summary(store):
     """Test searching documents by summary"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="AI Paper",
         url="https://example.com/ai.pdf",
         summary="Deep learning and neural networks",
@@ -249,7 +249,7 @@ async def test_search_by_summary(store):
 async def test_search_by_tags(store):
     """Test searching documents by tags"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Research Paper",
         url="https://example.com/paper.pdf",
         summary="A research paper",
@@ -268,7 +268,7 @@ async def test_search_by_tags(store):
 async def test_search_case_insensitive(store):
     """Test that search is case-insensitive"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="PyTorch Documentation",
         url="https://example.com/pytorch.pdf",
         summary="PyTorch deep learning framework",
@@ -290,7 +290,7 @@ async def test_search_with_limit(store):
     # Add multiple matching documents
     for i in range(5):
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name=f"Python Tutorial {i}",
             url=f"https://example.com/python{i}.pdf",
             summary="Python programming guide",
@@ -306,7 +306,7 @@ async def test_search_with_limit(store):
 async def test_search_no_matches(store):
     """Test search with no matches"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="JavaScript Guide",
         url="https://example.com/js.pdf",
         summary="Learn JavaScript",
@@ -324,7 +324,7 @@ async def test_search_no_matches(store):
 async def test_delete_document(store):
     """Test deleting a document"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -344,9 +344,7 @@ async def test_delete_nonexistent_document(store):
     """Test deleting a document that doesn't exist"""
     from asta.resources.model import construct_document_uri
 
-    uri = construct_document_uri(
-        store.namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
     deleted = await store.delete(uri)
     assert deleted is False
 
@@ -355,7 +353,7 @@ async def test_delete_nonexistent_document(store):
 async def test_exists(store):
     """Test checking if a document exists"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -367,9 +365,7 @@ async def test_exists(store):
 
     from asta.resources.model import construct_document_uri
 
-    fake_uri = construct_document_uri(
-        store.namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    fake_uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
     assert not await store.exists(fake_uri)
 
 
@@ -379,9 +375,7 @@ async def test_exists_wrong_namespace(store):
     from asta.resources.model import construct_document_uri
 
     wrong_namespace = "wrong-namespace-different-from-store"
-    uri = construct_document_uri(
-        wrong_namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
     assert not await store.exists(uri)
 
 
@@ -394,7 +388,7 @@ async def test_persistence(temp_index_path):
     )
     async with store1:
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Persistent Document",
             url="https://example.com/doc.pdf",
             summary="A persistent document",
@@ -414,9 +408,9 @@ async def test_persistence(temp_index_path):
 
 @pytest.mark.asyncio
 async def test_update_document(store):
-    """Test updating a document by storing with same URI"""
+    """Test updating a document using the update method"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Original Name",
         url="https://example.com/doc.pdf",
         summary="Original summary",
@@ -425,15 +419,17 @@ async def test_update_document(store):
 
     uri = await store.store(doc)
 
-    # Update the document
-    doc.uri = uri
-    doc.name = "Updated Name"
-    doc.summary = "Updated summary"
-    doc.tags = ["updated"]
+    # Update the document using the update method
+    updated = await store.update(
+        uri, name="Updated Name", summary="Updated summary", tags=["updated"]
+    )
 
-    await store.store(doc)
+    # Verify update
+    assert updated.name == "Updated Name"
+    assert updated.summary == "Updated summary"
+    assert updated.tags == ["updated"]
 
-    # Retrieve and verify update
+    # Retrieve and verify persistence
     retrieved = await store.get(uri)
     assert retrieved.name == "Updated Name"
     assert retrieved.summary == "Updated summary"
@@ -444,7 +440,7 @@ async def test_update_document(store):
 async def test_extra_metadata(store):
     """Test storing and retrieving extra metadata"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Research Paper",
         url="https://example.com/paper.pdf",
         summary="A research paper",
@@ -469,7 +465,7 @@ async def test_extra_metadata(store):
 async def test_search_extra_fields(store):
     """Test searching in extra metadata fields"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Paper",
         url="https://example.com/paper.pdf",
         summary="A paper",
@@ -495,7 +491,7 @@ async def test_search_extra_fields(store):
 async def test_search_returns_scores(store):
     """Test that search results include relevance scores"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document about Python programming",
@@ -515,7 +511,7 @@ async def test_fts5_search_basic(store):
     """Test FTS5 search finds documents correctly"""
     docs = [
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Attention Is All You Need",
             url="https://arxiv.org/pdf/1706.03762.pdf",
             summary="Seminal paper introducing the Transformer architecture for NLP",
@@ -523,7 +519,7 @@ async def test_fts5_search_basic(store):
             tags=["ai", "nlp", "transformers"],
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="BERT Paper",
             url="https://arxiv.org/pdf/1810.04805.pdf",
             summary="BERT model for language understanding",
@@ -531,7 +527,7 @@ async def test_fts5_search_basic(store):
             tags=["ai", "nlp"],
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="ResNet Paper",
             url="https://arxiv.org/pdf/1512.03385.pdf",
             summary="Residual networks for image recognition",
@@ -558,7 +554,7 @@ async def test_fts5_field_boosting(store):
     """Test that FTS5 search respects field weights (summary > name > tags)"""
     docs = [
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Neural Networks in Summary",
             url="https://example.com/doc1.pdf",
             summary="This document is about transformers and attention mechanisms",
@@ -566,7 +562,7 @@ async def test_fts5_field_boosting(store):
             tags=["ai"],
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="This is about transformers",
             url="https://example.com/doc2.pdf",
             summary="This document discusses neural network architectures",
@@ -574,7 +570,7 @@ async def test_fts5_field_boosting(store):
             tags=["ml"],
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Generic Document",
             url="https://example.com/doc3.pdf",
             summary="This document discusses various topics",
@@ -601,7 +597,7 @@ async def test_fts5_field_boosting(store):
 async def test_search_mode_auto_selects_fts5(store):
     """Test that auto mode selects FTS5 when available"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -630,7 +626,7 @@ async def test_simple_search_fallback(temp_index_path):
     )
     async with store:
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Test Document",
             url="https://example.com/doc.pdf",
             summary="A test document about Python",
@@ -649,7 +645,7 @@ async def test_simple_search_fallback(temp_index_path):
 async def test_fts5_search_with_multiple_terms(store):
     """Test FTS5 search with multiple search terms"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="AI Research Paper",
         url="https://example.com/paper.pdf",
         summary="Deep learning and neural networks for natural language processing",
@@ -670,21 +666,21 @@ async def test_search_ranking_by_relevance(store):
     """Test that search results are ranked by relevance"""
     docs = [
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Highly Relevant Document",
             url="https://example.com/doc1.pdf",
             summary="Python Python Python programming language Python",
             mime_type="application/pdf",
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Somewhat Relevant Document",
             url="https://example.com/doc2.pdf",
             summary="Introduction to Python programming",
             mime_type="application/pdf",
         ),
         DocumentMetadata(
-            uri="",
+            uuid="",
             name="Less Relevant Document",
             url="https://example.com/doc3.pdf",
             summary="Programming languages include Python",
@@ -710,7 +706,7 @@ async def test_search_cache_sync_on_changes(temp_index_path):
     async with store:
         # Add first document
         doc1 = DocumentMetadata(
-            uri="",
+            uuid="",
             name="First Document",
             url="https://example.com/doc1.pdf",
             summary="First document",
@@ -724,7 +720,7 @@ async def test_search_cache_sync_on_changes(temp_index_path):
 
         # Add second document
         doc2 = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Second Document",
             url="https://example.com/doc2.pdf",
             summary="Second document",
@@ -746,7 +742,7 @@ async def test_search_cache_sync_on_changes(temp_index_path):
 async def test_update_document_name(store):
     """Test updating a document's name"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Original Name",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -770,7 +766,7 @@ async def test_update_document_name(store):
 async def test_update_document_url(store):
     """Test updating a document's URL"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/old.pdf",
         summary="A test document",
@@ -790,7 +786,7 @@ async def test_update_document_url(store):
 async def test_update_document_summary(store):
     """Test updating a document's summary"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="Original summary",
@@ -809,7 +805,7 @@ async def test_update_document_summary(store):
 async def test_update_document_tags(store):
     """Test updating a document's tags"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -829,7 +825,7 @@ async def test_update_document_tags(store):
 async def test_update_document_extra_metadata(store):
     """Test updating a document's extra metadata"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -849,7 +845,7 @@ async def test_update_document_extra_metadata(store):
 async def test_update_multiple_fields(store):
     """Test updating multiple fields at once"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Original Name",
         url="https://example.com/old.pdf",
         summary="Original summary",
@@ -878,9 +874,7 @@ async def test_update_nonexistent_document(store):
     """Test updating a document that doesn't exist"""
     from asta.resources.model import construct_document_uri
 
-    uri = construct_document_uri(
-        store.namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
 
     with pytest.raises(ValidationError, match="Document not found"):
         await store.update(uri, name="New Name")
@@ -892,9 +886,7 @@ async def test_update_validates_namespace(store):
     from asta.resources.model import construct_document_uri
 
     wrong_namespace = "wrong-namespace"
-    uri = construct_document_uri(
-        wrong_namespace, "00000000-0000-0000-0000-000000000000"
-    )
+    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
 
     with pytest.raises(ValidationError, match="Namespace mismatch"):
         await store.update(uri, name="New Name")
@@ -904,7 +896,7 @@ async def test_update_validates_namespace(store):
 async def test_update_validates_empty_name(store):
     """Test that update validates non-empty name"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -921,7 +913,7 @@ async def test_update_validates_empty_name(store):
 async def test_update_validates_empty_url(store):
     """Test that update validates non-empty URL"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -938,7 +930,7 @@ async def test_update_validates_empty_url(store):
 async def test_update_validates_url_format(store):
     """Test that update validates URL format"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -983,7 +975,7 @@ async def test_update_accepts_various_url_protocols(store):
 async def test_update_validates_empty_summary(store):
     """Test that update validates non-empty summary"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1002,7 +994,7 @@ async def test_update_persists_to_disk(temp_index_path):
     store = LocalIndexDocumentStore(index_path=str(temp_index_path))
     async with store:
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Original Name",
             url="https://example.com/doc.pdf",
             summary="A test document",
@@ -1029,7 +1021,7 @@ async def test_update_persists_to_disk(temp_index_path):
 async def test_add_tags_to_document(store):
     """Test adding tags to a document"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1053,7 +1045,7 @@ async def test_add_tags_to_document(store):
 async def test_add_tags_removes_duplicates(store):
     """Test that adding duplicate tags doesn't create duplicates"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1076,7 +1068,7 @@ async def test_add_tags_removes_duplicates(store):
 async def test_add_tags_to_document_without_existing_tags(store):
     """Test adding tags to a document that has no tags"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1098,7 +1090,7 @@ async def test_add_tags_to_document_without_existing_tags(store):
 async def test_add_tags_sorts_tags(store):
     """Test that tags are sorted alphabetically"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1116,7 +1108,7 @@ async def test_add_tags_sorts_tags(store):
 async def test_add_tags_nonexistent_document(store):
     """Test adding tags to a non-existent document raises error"""
     # Use a properly formatted URI with UUID
-    fake_uri = f"asta://{store.namespace}/00000000-0000-0000-0000-000000000000"
+    fake_uri = f"asta://{store.namespace}/{TEST_SHORT_ID}"
     with pytest.raises(ValidationError, match="Document not found"):
         await store.add_tags(fake_uri, ["tag"])
 
@@ -1125,7 +1117,7 @@ async def test_add_tags_nonexistent_document(store):
 async def test_remove_tags_from_document(store):
     """Test removing tags from a document"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1148,7 +1140,7 @@ async def test_remove_tags_from_document(store):
 async def test_remove_tags_ignores_nonexistent_tags(store):
     """Test that removing non-existent tags doesn't raise error"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1169,7 +1161,7 @@ async def test_remove_tags_ignores_nonexistent_tags(store):
 async def test_remove_all_tags(store):
     """Test removing all tags from a document"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1189,7 +1181,7 @@ async def test_remove_all_tags(store):
 async def test_remove_tags_nonexistent_document(store):
     """Test removing tags from a non-existent document raises error"""
     # Use a properly formatted URI with UUID
-    fake_uri = f"asta://{store.namespace}/00000000-0000-0000-0000-000000000000"
+    fake_uri = f"asta://{store.namespace}/{TEST_SHORT_ID}"
     with pytest.raises(ValidationError, match="Document not found"):
         await store.remove_tags(fake_uri, ["tag"])
 
@@ -1198,7 +1190,7 @@ async def test_remove_tags_nonexistent_document(store):
 async def test_get_documents_by_tags_any(store):
     """Test getting documents by tags (any match)"""
     doc1 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 1",
         url="https://example.com/doc1.pdf",
         summary="First document",
@@ -1206,7 +1198,7 @@ async def test_get_documents_by_tags_any(store):
         tags=["ai", "ml"],
     )
     doc2 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 2",
         url="https://example.com/doc2.pdf",
         summary="Second document",
@@ -1214,7 +1206,7 @@ async def test_get_documents_by_tags_any(store):
         tags=["ai", "nlp"],
     )
     doc3 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 3",
         url="https://example.com/doc3.pdf",
         summary="Third document",
@@ -1239,7 +1231,7 @@ async def test_get_documents_by_tags_any(store):
 async def test_get_documents_by_tags_all(store):
     """Test getting documents by tags (all match)"""
     doc1 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 1",
         url="https://example.com/doc1.pdf",
         summary="First document",
@@ -1247,7 +1239,7 @@ async def test_get_documents_by_tags_all(store):
         tags=["ai", "ml", "research"],
     )
     doc2 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 2",
         url="https://example.com/doc2.pdf",
         summary="Second document",
@@ -1255,7 +1247,7 @@ async def test_get_documents_by_tags_all(store):
         tags=["ai", "research"],
     )
     doc3 = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Doc 3",
         url="https://example.com/doc3.pdf",
         summary="Third document",
@@ -1280,7 +1272,7 @@ async def test_get_documents_by_tags_all(store):
 async def test_get_documents_by_tags_no_matches(store):
     """Test getting documents by tags when no matches exist"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1299,7 +1291,7 @@ async def test_get_documents_by_tags_no_matches(store):
 async def test_get_documents_by_tags_empty_tags(store):
     """Test getting documents when they have no tags"""
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1320,7 +1312,7 @@ async def test_tag_operations_update_modified_timestamp(store):
     import asyncio
 
     doc = DocumentMetadata(
-        uri="",
+        uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
         summary="A test document",
@@ -1353,7 +1345,7 @@ async def test_tag_operations_persist_to_disk(temp_index_path):
     store = LocalIndexDocumentStore(index_path=str(temp_index_path))
     async with store:
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Test Document",
             url="https://example.com/doc.pdf",
             summary="A test document",
@@ -1371,3 +1363,213 @@ async def test_tag_operations_persist_to_disk(temp_index_path):
         assert retrieved is not None
         assert "original" in retrieved.tags
         assert "added" in retrieved.tags
+
+
+# ===== Tests for Short ID functionality =====
+
+
+@pytest.mark.asyncio
+async def test_short_id_generation(store):
+    """Test that short IDs are generated correctly (10-char alphanumeric)"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+
+    # Parse URI to extract UUID
+    from asta.resources.model import parse_document_uri
+
+    namespace, uuid = parse_document_uri(uri)
+
+    # Verify UUID is 10 characters and alphanumeric
+    assert len(uuid) == 10
+    assert uuid.isalnum()
+    assert all(
+        c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        for c in uuid
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_id_collision_detection(store):
+    """Test that short ID collision detection works"""
+    # Create multiple documents and verify unique UUIDs
+    uuids = set()
+    for i in range(100):
+        doc = DocumentMetadata(
+            uuid="",
+            name=f"Document {i}",
+            url=f"https://example.com/doc{i}.pdf",
+            summary=f"Document {i} summary",
+            mime_type="application/pdf",
+        )
+        uri = await store.store(doc)
+
+        from asta.resources.model import parse_document_uri
+
+        _, uuid = parse_document_uri(uri)
+
+        # Verify no collisions
+        assert uuid not in uuids, f"UUID collision detected: {uuid}"
+        uuids.add(uuid)
+
+    # Verify all 100 UUIDs are unique
+    assert len(uuids) == 100
+
+
+@pytest.mark.asyncio
+async def test_namespace_injection(store):
+    """Test that namespace is injected into loaded documents"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+    retrieved = await store.get(uri)
+
+    # Verify namespace is injected
+    assert retrieved._namespace == store.namespace
+    assert retrieved._namespace != ""
+
+
+@pytest.mark.asyncio
+async def test_uri_property_reconstruction(store):
+    """Test that URI property correctly reconstructs full URI"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Document",
+        url="https://example.com/doc.pdf",
+        summary="A test document",
+        mime_type="application/pdf",
+    )
+
+    uri = await store.store(doc)
+    retrieved = await store.get(uri)
+
+    # Verify URI is reconstructed correctly
+    assert retrieved.uri == uri
+    assert retrieved.uri.startswith("asta://")
+    assert retrieved._namespace in retrieved.uri
+    assert retrieved.uuid in retrieved.uri
+
+    # Verify format
+    from asta.resources.model import parse_document_uri
+
+    namespace, uuid = parse_document_uri(retrieved.uri)
+    assert namespace == store.namespace
+    assert uuid == retrieved.uuid
+
+
+@pytest.mark.asyncio
+async def test_uuid_field_in_yaml(temp_index_path):
+    """Test that saved YAML contains uuid field, not uri field"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Document",
+            url="https://example.com/doc.pdf",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+
+        await store.store(doc)
+
+    # Read YAML file directly
+    with open(temp_index_path, "r") as f:
+        data = yaml.safe_load(f)
+
+    # Verify structure
+    assert "documents" in data
+    assert len(data["documents"]) == 1
+
+    doc_data = data["documents"][0]
+
+    # Verify uuid field exists
+    assert "uuid" in doc_data
+    assert len(doc_data["uuid"]) == 10
+    assert doc_data["uuid"].replace("_", "").replace("-", "").isalnum()
+
+    # Verify uri field does NOT exist
+    assert "uri" not in doc_data
+
+    # Verify _namespace field does NOT exist (private, not serialized)
+    assert "_namespace" not in doc_data
+
+
+@pytest.mark.asyncio
+async def test_short_id_persistence_across_reloads(temp_index_path):
+    """Test that short IDs persist correctly across store reloads"""
+    # Store a document
+    store1 = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store1:
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Document",
+            url="https://example.com/doc.pdf",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+        uri = await store1.store(doc)
+
+        # Extract UUID
+        from asta.resources.model import parse_document_uri
+
+        _, uuid1 = parse_document_uri(uri)
+
+    # Reload and verify
+    store2 = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store2:
+        retrieved = await store2.get(uri)
+        assert retrieved is not None
+        assert retrieved.uuid == uuid1
+        assert retrieved.uri == uri
+
+
+@pytest.mark.asyncio
+async def test_uri_parsing_with_short_ids(store):
+    """Test that URI parsing works with short IDs"""
+    from asta.resources.model import parse_document_uri, construct_document_uri
+
+    # Test valid short ID
+    short_id = "abc123XYZ0"
+    uri = construct_document_uri(store.namespace, short_id)
+
+    assert uri == f"asta://{store.namespace}/{short_id}"
+
+    # Parse it back
+    namespace, uuid = parse_document_uri(uri)
+    assert namespace == store.namespace
+    assert uuid == short_id
+
+
+@pytest.mark.asyncio
+async def test_invalid_short_id_format(store):
+    """Test that invalid short ID formats are rejected"""
+    from asta.resources.model import construct_document_uri
+    from asta.resources.exceptions import ValidationError
+
+    # Test too short
+    with pytest.raises(ValidationError, match="10-character"):
+        construct_document_uri(store.namespace, "abc123")
+
+    # Test too long
+    with pytest.raises(ValidationError, match="10-character"):
+        construct_document_uri(store.namespace, "abc123xyz012")
+
+    # Test invalid characters
+    with pytest.raises(ValidationError, match="10-character"):
+        construct_document_uri(store.namespace, "abc!@#$%^&")
+
+    # Test spaces
+    with pytest.raises(ValidationError, match="10-character"):
+        construct_document_uri(store.namespace, "abc 123xyz")
