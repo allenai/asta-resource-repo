@@ -188,7 +188,65 @@ Search Query
 └── .index_checksum     # YAML modification tracker (gitignored)
 ```
 
-### Search Modes
+### Field-Specific Search
+
+The search system uses **field-specific strategies** based on which document field you're searching:
+
+**Field Flags** (mutually exclusive):
+- `--name`: Search document names with simple word matching
+- `--tags`: Search tags with comma-separated matching
+- `--summary`: Search summaries with semantic/hybrid search (default)
+- `--extra`: Search extra metadata with JSONPath-like syntax
+
+**Examples:**
+```bash
+# Name search (simple word matching)
+asta-documents search "Attention" --name
+
+# Tag search (comma-separated, percentage scoring)
+asta-documents search "ai,nlp" --tags
+
+# Summary search (semantic/hybrid, default)
+asta-documents search "papers about transformers"
+asta-documents search "transformers" --summary  # explicit
+
+# Extra metadata search (JSONPath queries)
+asta-documents search ".year > 2020" --extra
+asta-documents search ".author contains Vaswani" --extra
+asta-documents search ".venue == NeurIPS" --extra
+```
+
+**Field-Specific Implementations:**
+
+1. **Name Search** (`_search_by_name()`):
+   - Simple case-insensitive word matching
+   - Splits query into words, matches any word in name
+   - Score = (matched words / total query words)
+   - Fast in-memory scan, no indexing needed
+
+2. **Tag Search** (`_search_by_tags()`):
+   - Comma-separated tag matching
+   - Case-insensitive
+   - Score = (matched tags / total query tags)
+   - Works with partial matches (finds docs with any matching tags)
+
+3. **Summary Search** (`_search_by_summary()`):
+   - Uses best available method with automatic fallback:
+     - Hybrid (BM25 + semantic embeddings) → BM25 → FTS5 → Simple
+   - Optimized for natural language queries
+   - Understands semantic meaning
+
+4. **Extra Metadata Search** (`_search_by_extra()`):
+   - JSONPath-like query syntax
+   - Supported operators: `>`, `>=`, `<`, `<=`, `==`, `contains`
+   - Numeric and string comparisons
+   - Example: `.year > 2020` finds docs where `extra.year > 2020`
+
+### Search Implementation Details
+
+Below are the internal search methods used by summary field search (not directly user-facing):
+
+#### 1. Simple Search (Baseline)
 
 #### 1. Simple Search (Baseline)
 
@@ -353,26 +411,32 @@ search {
 **Basic usage**:
 ```python
 async with LocalIndexDocumentStore() as store:
-    # Auto mode (selects best available)
+    # Default: search summaries (uses best available method)
     hits = await store.search("transformer architecture")
 
-    # Specific mode
+    # Field-specific search
     hits = await store.search(
-        "neural networks",
+        "Attention",
         limit=10,
-        search_mode="hybrid"
+        search_field="name"
     )
+
+    # Tag search
+    hits = await store.search("ai,nlp", search_field="tags")
+
+    # Extra metadata search
+    hits = await store.search(".year > 2020", search_field="extra")
 
     # Each hit has .result and .score
     for hit in hits:
         print(f"{hit.result.name}: {hit.score:.4f}")
 ```
 
-**Mode selection logic** (`_determine_search_mode()`):
-- If embeddings available → "hybrid"
-- Else if BM25 index available → "bm25"
-- Else if FTS5 available → "fts5"
-- Else → "simple"
+**Field selection**:
+- `search_field="summary"` (default): Uses automatic method selection (hybrid → BM25 → FTS5 → simple)
+- `search_field="name"`: Simple word matching
+- `search_field="tags"`: Tag matching with comma-separated queries
+- `search_field="extra"`: JSONPath-like queries for metadata
 
 ### Cache Synchronization
 
@@ -564,17 +628,22 @@ uv run asta-documents list --tags="ai,research"
 # List with verbose output
 uv run asta-documents list -v
 
-# Search documents (auto mode)
+# Search documents (searches summaries by default using best available method)
 uv run asta-documents search "transformer"
 
-# Search with specific mode
-uv run asta-documents search "neural networks" --mode=keyword --show-scores
+# Search by document name
+uv run asta-documents search "Attention" --name
 
-# Semantic search
-uv run asta-documents search "papers about attention" --mode=semantic
+# Search by tags
+uv run asta-documents search "ai,nlp" --tags
 
-# Hybrid search
-uv run asta-documents search "deep learning" --mode=hybrid --show-scores
+# Search summaries with scores
+uv run asta-documents search "deep learning" --summary --show-scores
+
+# Search extra metadata with JSONPath-like syntax
+uv run asta-documents search ".year > 2020" --extra
+uv run asta-documents search ".author contains Vaswani" --extra
+uv run asta-documents search ".venue == NeurIPS" --extra
 
 # Get specific document
 uv run asta-documents get asta://owner/repo/UUID
@@ -959,11 +1028,16 @@ uv run asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
 # List documents
 uv run asta-documents list
 
-# Search (uses best available mode automatically)
+# Search (searches summaries by default using best available method)
 uv run asta-documents search "attention"
 
 # Search with scores
 uv run asta-documents search "transformer" --show-scores
+
+# Search by specific field
+uv run asta-documents search "Attention" --name
+uv run asta-documents search "ai,transformers" --tags
+uv run asta-documents search ".year > 2015" --extra
 
 # Update document metadata (use URI from add command output)
 uv run asta-documents update asta://allenai/asta-resource-repo/6MNxGbWGRC \

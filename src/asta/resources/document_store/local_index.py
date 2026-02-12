@@ -293,17 +293,22 @@ class LocalIndexDocumentStore(DocumentStore):
         return list(self._documents.values())
 
     async def search(
-        self, query: str, limit: int = 10, search_mode: str = "auto"
+        self,
+        query: str,
+        limit: int = 10,
+        search_mode: str = "auto",
+        search_field: str = "summary",
     ) -> list[SearchHit]:
-        """Search documents with multiple strategies
+        """Search documents with field-specific strategies
 
-        Searches across name, summary, tags, and extra fields using the
-        specified search mode. Auto mode selects the best available method.
+        Routes search to appropriate method based on search_field.
+        Summary field uses semantic/hybrid search by default.
 
         Args:
             query: Search query string
             limit: Maximum number of results
-            search_mode: Search strategy - "auto", "simple", "keyword", "bm25", "semantic", or "hybrid" (default: "auto")
+            search_mode: Legacy parameter (ignored, kept for backward compatibility)
+            search_field: Field to search - "name", "tags", "summary", or "extra" (default: "summary")
 
         Returns:
             List of search hits ranked by relevance score
@@ -311,54 +316,63 @@ class LocalIndexDocumentStore(DocumentStore):
         if not self._initialized:
             await self.initialize()
 
-        # Determine search mode
-        if search_mode == "auto":
-            search_mode = self._determine_search_mode()
+        # Route to field-specific search method
+        if search_field == "name":
+            return await self._search_by_name(query, limit)
+        elif search_field == "tags":
+            return await self._search_by_tags(query, limit)
+        elif search_field == "extra":
+            return await self._search_by_extra(query, limit)
+        else:
+            # Default: summary field
+            return await self._search_by_summary(query, limit)
 
-        # Execute search based on mode with fallback logic
-        try:
-            if search_mode == "hybrid":
-                return await self._search_hybrid(query, limit)
-            elif search_mode == "semantic":
-                return await self._search_semantic(query, limit)
-            elif search_mode in ["keyword", "bm25"]:
-                return await self._search_bm25(query, limit)
-            elif search_mode == "fts5":
-                return await self._search_fts5(query, limit)
-            else:
-                return await self._search_simple(query, limit)
-        except ImportError as e:
-            logger.warning(
-                f"{search_mode} search not available: {e}. Falling back to keyword search."
-            )
-            if search_mode in ["hybrid", "semantic"]:
-                # Fallback to keyword if embeddings not available
-                return await self._search_bm25(query, limit)
-            else:
-                # Fallback to simple search
-                return await self._search_simple(query, limit)
+    async def _search_by_summary(self, query: str, limit: int = 10) -> list[SearchHit]:
+        """Search document summaries using semantic/hybrid search
 
-    def _determine_search_mode(self) -> str:
-        """Auto-detect best search mode based on available features
+        Uses the best available search method with automatic fallback:
+        1. Hybrid (BM25 + semantic embeddings)
+        2. BM25 (keyword relevance ranking)
+        3. FTS5 (full-text search)
+        4. Simple (in-memory substring matching)
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
 
         Returns:
-            Search mode string ("hybrid", "bm25", "fts5", or "simple")
+            List of search hits ranked by relevance score
         """
-        if self._search_cache and self._search_cache._initialized:
-            # Check if embeddings are available
-            if self._embedding_manager:
-                return "hybrid"
-
-            # Check if BM25 index is available
+        # Try hybrid search first (best quality)
+        if self._embedding_manager:
             try:
-                cursor = self._search_cache.conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM collection_stats")
-                if cursor.fetchone()[0] > 0:
-                    return "bm25"
-            except Exception:
-                pass
-            return "fts5"
-        return "simple"
+                logger.debug("Using hybrid search (BM25 + semantic)")
+                return await self._search_hybrid(query, limit)
+            except ImportError:
+                logger.debug(
+                    "Hybrid search unavailable (missing sentence-transformers)"
+                )
+            except Exception as e:
+                logger.warning(f"Hybrid search failed: {e}")
+
+        # Fall back to BM25
+        if self._search_cache and self._search_cache._initialized:
+            try:
+                logger.debug("Using BM25 search")
+                return await self._search_bm25(query, limit)
+            except Exception as e:
+                logger.debug(f"BM25 search failed: {e}")
+
+            # Fall back to FTS5
+            try:
+                logger.debug("Using FTS5 search")
+                return await self._search_fts5(query, limit)
+            except Exception as e:
+                logger.debug(f"FTS5 search failed: {e}")
+
+        # Last resort: simple search
+        logger.debug("Using simple search (fallback)")
+        return await self._search_simple(query, limit)
 
     async def _search_bm25(self, query: str, limit: int) -> list[SearchHit]:
         """BM25-based search with TF-IDF weighting
@@ -450,6 +464,195 @@ class LocalIndexDocumentStore(DocumentStore):
         except Exception as e:
             logger.warning(f"FTS5 search failed: {e}. Falling back to simple search.")
             return await self._search_simple(query, limit)
+
+    async def _search_by_name(self, query: str, limit: int = 10) -> list[SearchHit]:
+        """Simple word matching for name field search
+
+        Case-insensitive substring matching against document names.
+        Splits query into words and matches any word against the name.
+
+        Args:
+            query: Search query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by match count
+        """
+        query_words = query.lower().split()
+        results = []
+
+        for doc in self._documents.values():
+            if not doc.name:
+                continue
+
+            name_lower = doc.name.lower()
+            matches = sum(1 for word in query_words if word in name_lower)
+
+            if matches > 0:
+                # Score is the fraction of query words that matched
+                score = matches / len(query_words)
+                results.append((score, doc))
+
+        # Sort by score (descending) and limit
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [
+            SearchHit(result=doc, score=float(score)) for score, doc in results[:limit]
+        ]
+
+    async def _search_by_tags(self, query: str, limit: int = 10) -> list[SearchHit]:
+        """Tag-based search with comma-separated tag matching
+
+        Case-insensitive tag matching. Supports comma-separated tags.
+        Returns documents with any matching tags, scored by match percentage.
+
+        Args:
+            query: Comma-separated tags to search for
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits ranked by tag match percentage
+        """
+        query_tags = {tag.strip().lower() for tag in query.split(",")}
+        results = []
+
+        for doc in self._documents.values():
+            if not doc.tags:
+                continue
+
+            doc_tags = {tag.lower() for tag in doc.tags}
+            matching = query_tags & doc_tags
+
+            if matching:
+                # Score is the fraction of query tags that matched
+                score = len(matching) / len(query_tags)
+                results.append((score, doc))
+
+        # Sort by score (descending) and limit
+        results.sort(key=lambda x: x[0], reverse=True)
+        return [
+            SearchHit(result=doc, score=float(score)) for score, doc in results[:limit]
+        ]
+
+    def _parse_extra_query(self, query: str) -> tuple[str, str, str]:
+        """Parse extra metadata query into field, operator, and value
+
+        Supports queries like:
+        - .year > 2020
+        - .author contains "Smith"
+        - .venue == NeurIPS
+
+        Args:
+            query: Query string with JSONPath-like syntax
+
+        Returns:
+            Tuple of (field, operator, value)
+
+        Raises:
+            ValueError: If query format is invalid
+        """
+        import re
+
+        # Remove leading dot if present
+        query = query.strip()
+        if query.startswith("."):
+            query = query[1:]
+
+        # Try to match: field operator value
+        # Operators: contains, >, >=, <, <=, ==
+        pattern = r"(\w+)\s*(contains|>=|<=|>|<|==)\s*(.+)"
+        match = re.match(pattern, query)
+
+        if not match:
+            raise ValueError(
+                f"Invalid extra metadata query: {query}. Expected format: '.field operator value'"
+            )
+
+        field, operator, value = match.groups()
+
+        # Clean up value (remove quotes if present)
+        value = value.strip().strip('"').strip("'")
+
+        return field, operator, value
+
+    def _match_extra_query(
+        self, doc: DocumentMetadata, field: str, operator: str, value: str
+    ) -> bool:
+        """Check if document's extra metadata matches the query
+
+        Args:
+            doc: Document to check
+            field: Field name in extra metadata
+            operator: Comparison operator (contains, >, >=, <, <=, ==)
+            value: Value to compare against
+
+        Returns:
+            True if document matches query, False otherwise
+        """
+        if not doc.extra or field not in doc.extra:
+            return False
+
+        field_value = doc.extra[field]
+
+        try:
+            if operator == "contains":
+                # String containment (case-insensitive)
+                return value.lower() in str(field_value).lower()
+            elif operator in (">", ">=", "<", "<=", "=="):
+                # Numeric/string comparison
+                # Try to convert to numbers if possible
+                try:
+                    field_num = float(field_value)
+                    value_num = float(value)
+                    if operator == ">":
+                        return field_num > value_num
+                    elif operator == ">=":
+                        return field_num >= value_num
+                    elif operator == "<":
+                        return field_num < value_num
+                    elif operator == "<=":
+                        return field_num <= value_num
+                    elif operator == "==":
+                        return field_num == value_num
+                except (ValueError, TypeError):
+                    # Fall back to string comparison
+                    if operator == "==":
+                        return str(field_value).lower() == value.lower()
+                    else:
+                        # Non-numeric comparisons only work with ==
+                        return False
+        except Exception:
+            return False
+
+        return False
+
+    async def _search_by_extra(self, query: str, limit: int = 10) -> list[SearchHit]:
+        """Search extra metadata fields with JSONPath-like syntax
+
+        Supports queries like:
+        - .year > 2020
+        - .author contains "Smith"
+        - .venue == NeurIPS
+
+        Args:
+            query: JSONPath-like query string
+            limit: Maximum number of results
+
+        Returns:
+            List of search hits (score=1.0 for all matches)
+        """
+        try:
+            field, operator, value = self._parse_extra_query(query)
+        except ValueError as e:
+            logger.error(f"Failed to parse extra metadata query: {e}")
+            return []
+
+        results = []
+
+        for doc in self._documents.values():
+            if self._match_extra_query(doc, field, operator, value):
+                results.append(SearchHit(result=doc, score=1.0))
+
+        return results[:limit]
 
     async def _search_simple(self, query: str, limit: int = 10) -> list[SearchHit]:
         """Simple in-memory substring search (fallback method)

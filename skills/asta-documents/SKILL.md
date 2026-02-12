@@ -21,62 +21,29 @@ This skill provides complete document management functionality for tracking rese
 uv tool install git+https://github.com/allenai/asta-resource-repo.git
 ```
 
-This installs the `asta-documents` command globally on your system.
-
 **Prerequisites:** Python 3.10+ and [uv package manager](https://docs.astral.sh/uv/)
 
-### 2. Install This Skill
-
-Copy this file to your Claude Code skills directory:
-
-```bash
-# macOS/Linux
-mkdir -p ~/.claude/skills
-curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/allenai/asta-resource-repo/main/skills/asta-documents.md
-
-# Or manually copy this file to ~/.claude/skills/
-```
-
-### 3. Verify Installation
-
-```bash
-# Test the CLI
-asta-documents --help
-
-# Verify skill is available
-# In Claude Code, type /asta-documents
-```
-
-## Core Concepts
-
-**Asta stores metadata only** - not document content:
-- **URL**: Where the actual document lives (must be HTTP/HTTPS)
-- **Name**: Document title
-- **Summary**: Description for search (required, indexed)
-- **Tags**: Categorization labels
-- **MIME type**: Document type (application/pdf, text/plain, etc.)
-- **Extra metadata**: Custom fields (author, year, venue, etc.)
-
-**Document URIs**: Auto-generated identifiers like `asta://namespace/uuid`
-
-**Index location**: `.asta/documents/index.yaml` (git-tracked, shareable)
-
-**Content cache**: `.asta/documents/cache/` (gitignored, auto-managed)
+Verify installation with `asta-documents --help`
 
 ## Quick Command Reference
+
+Add `--json` flag to any command for machine-readable output.
 
 ```bash
 # List documents
 asta-documents list
 asta-documents list --tags="ai,research"
-asta-documents list -v  # Verbose
 
-# Search documents
+# Search document summaries
 asta-documents search "query"
-asta-documents search "query" --mode=hybrid --show-scores
+
+# Search by specific field
+asta-documents search "title words" --name
+asta-documents search "ai,nlp" --tags
+asta-documents search ".year > 2020" --extra
 
 # Add document
-asta-documents add <url> --name="Title" --summary="Description" --tags="tag1,tag2"
+asta-documents add <url> --name="Title" --summary="Description" --tags="tag1,tag2" --extra='{"author": "Smith et al", "year": 2024, "venue": "NeurIPS"}'
 
 # Get document metadata
 asta-documents get <asta-uri>
@@ -90,7 +57,6 @@ asta-documents fetch <asta-uri> -o /tmp/document.pdf
 # Manage tags
 asta-documents add-tags <asta-uri> --tags="new,tags"
 asta-documents remove-tags <asta-uri> --tags="old,tags"
-asta-documents list-by-tags --tags="ai,ml"
 
 # Cache management
 asta-documents cache list
@@ -100,204 +66,19 @@ asta-documents cache clean --days 7
 # Index information
 asta-documents show
 ```
+Always use the command line interface for all operations to ensure proper index management and caching. 
+Avoid direct read/write operations on the index file. 
 
-## Operations
+## Fetch Document Content
 
-### 1. List Documents
-
-**List all documents:**
-```bash
-asta-documents list
-```
-
-**Filter by tags:**
-```bash
-asta-documents list --tags="ai,research"
-```
-
-**Verbose output (shows all metadata):**
-```bash
-asta-documents list -v
-```
-
-**JSON output (for processing):**
-```bash
-asta-documents list --json
-```
-
-### 2. Search Documents
-
-**Basic search (auto mode):**
-```bash
-asta-documents search "query string"
-```
-
-**Search with specific mode:**
-```bash
-# Simple substring matching
-asta-documents search "query" --mode=simple
-
-# Keyword search (BM25)
-asta-documents search "query" --mode=keyword
-
-# Semantic search
-asta-documents search "query" --mode=semantic
-
-# Hybrid (BM25 + semantic, best results)
-asta-documents search "query" --mode=hybrid
-```
-
-**Show relevance scores:**
-```bash
-asta-documents search "query" --show-scores
-```
-
-**Limit results:**
-```bash
-asta-documents search "query" --limit 5
-```
-
-**JSON output:**
-```bash
-asta-documents search "query" --json
-```
-
-### 3. Add Document
-
-**Add with required fields:**
-```bash
-asta-documents add <url> \
-  --name="Document Title" \
-  --summary="Description for search" \
-  --mime-type="application/pdf"
-```
-
-**Add with tags:**
-```bash
-asta-documents add <url> \
-  --name="Document Title" \
-  --summary="Description" \
-  --tags="ai,research,transformers"
-```
-
-**Add with extra metadata:**
-```bash
-asta-documents add <url> \
-  --name="Document Title" \
-  --summary="Description" \
-  --tags="ai,research" \
-  --extra='{"author": "Smith et al", "year": 2024, "venue": "NeurIPS"}'
-```
-
-**Common MIME types:**
-- `application/pdf` - PDF documents
-- `text/plain` - Plain text
-- `text/markdown` - Markdown
-- `text/html` - HTML
-- `application/json` - JSON
-
-### 4. Get Document Metadata
-
-**Get by URI:**
-```bash
-asta-documents get asta://namespace/uuid
-```
-
-**JSON output:**
-```bash
-asta-documents get asta://namespace/uuid --json
-```
-
-### 5. Update Document
-
-**Update single field:**
-```bash
-asta-documents update <asta-uri> --name="New Title"
-```
-
-**Update multiple fields:**
-```bash
-asta-documents update <asta-uri> \
-  --name="New Title" \
-  --summary="Updated description" \
-  --tags="updated,revised"
-```
-
-**Update extra metadata:**
-```bash
-asta-documents update <asta-uri> \
-  --extra='{"author": "New Author", "year": 2025}'
-```
-
-**Note**: Tags and extra metadata are replaced entirely, not merged.
-
-### 6. Manage Tags
-
-**Add tags (preserves existing):**
-```bash
-asta-documents add-tags <asta-uri> --tags="new,additional"
-```
-
-**Remove tags:**
-```bash
-asta-documents remove-tags <asta-uri> --tags="old,deprecated"
-```
-
-**List documents by tags (any match):**
-```bash
-asta-documents list-by-tags --tags="ai,ml"
-```
-
-**List documents by tags (all must match):**
-```bash
-asta-documents list-by-tags --tags="ai,research" --match-all
-```
-
-### 7. Remove Document
-
-**Remove by URI:**
-```bash
-asta-documents remove <asta-uri>
-```
-
-### 8. Fetch Document Content
+The index store metadata only. The content of a document is retrievable via its URL. The `fetch` command retrieves the content and caches it locally for future use.
 
 **Fetch to file (with automatic caching):**
 ```bash
 asta-documents fetch <asta-uri> -o /tmp/document.pdf
 ```
 
-**Fetch to stdout:**
-```bash
-asta-documents fetch <asta-uri> > document.pdf
-```
-
-**Force fresh download (bypass cache):**
-```bash
-asta-documents fetch <asta-uri> -o document.pdf --force
-```
-
-**Custom cache age (days):**
-```bash
-asta-documents fetch <asta-uri> -o document.pdf --max-age 30
-```
-
-**Quiet mode (suppress progress):**
-```bash
-asta-documents fetch <asta-uri> -o document.pdf -q
-```
-
-**After fetching, use Read tool for PDFs:**
-```bash
-# 1. Fetch document
-asta-documents fetch <asta-uri> -o /tmp/doc.pdf -q
-
-# 2. Extract and display with Read tool
-# Read(/tmp/doc.pdf)
-# The Read tool has native PDF support for better text extraction
-```
-
-### 9. Cache Management
+### Cache Management
 
 **List cached items:**
 ```bash
@@ -311,14 +92,8 @@ asta-documents cache stats
 
 **Clean old cache entries:**
 ```bash
-# Remove items older than 7 days (default)
-asta-documents cache clean
-
 # Remove items older than N days
 asta-documents cache clean --days 14
-
-# Dry run (see what would be removed)
-asta-documents cache clean --dry-run
 ```
 
 **Clear entire cache:**
@@ -330,13 +105,6 @@ asta-documents cache clear -y  # Skip confirmation
 **Show specific item details:**
 ```bash
 asta-documents cache info <hash>
-```
-
-### 10. Index Information
-
-**Show index stats:**
-```bash
-asta-documents show
 ```
 
 ## Common Workflows
@@ -352,8 +120,8 @@ asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
   --mime-type="application/pdf" \
   --extra='{"author": "Vaswani et al", "year": 2017, "venue": "NeurIPS"}'
 
-# List papers by tag
-asta-documents list-by-tags --tags="transformers"
+# Search papers by tag
+asta-documents search "transformers" --tags
 ```
 
 ### Workflow 2: Search and Fetch
@@ -427,32 +195,42 @@ asta-documents cache clean --days 7
 asta-documents cache stats
 ```
 
-## Search Modes Explained
+## Field-Specific Search
 
-**auto** (default) - Automatically selects best available:
-- Uses hybrid if embeddings available
-- Falls back to keyword (BM25) if not
-- Fast and smart
+Asta uses different search strategies optimized for each document field:
 
-**simple** - Basic substring matching:
-- Fastest, works everywhere
+**--name** (Name search):
+- Simple case-insensitive word matching
+- Splits query into words, matches any word in name
+- Score = (matched words / total query words)
+- Fast, no indexing needed
+- Example: `asta-documents search "Attention" --name`
+
+**--tags** (Tag search):
+- Comma-separated tag matching
 - Case-insensitive
-- Good for exact phrases
+- Score = (matched tags / total query tags)
+- Finds documents with any matching tags
+- Example: `asta-documents search "ai,nlp" --tags`
 
-**keyword** - BM25 ranking:
-- Industry-standard keyword search
-- Fast indexed search
-- Good for specific terms
+**--summary** (Summary search, default):
+- Uses best available method automatically:
+  - Hybrid (BM25 + semantic embeddings) → best quality
+  - BM25 (keyword relevance ranking) → fast indexed
+  - FTS5 (full-text search) → fallback
+  - Simple (substring matching) → always available
+- Optimized for natural language queries
+- Understands semantic meaning
+- Example: `asta-documents search "papers about transformers"`
 
-**semantic** - AI embeddings
-- Understands concepts and meaning
-- Best for natural language queries
-- Works offline (no API calls)
-
-**hybrid** - Combined BM25 + semantic
-- Best overall relevance
-- Balances precision and recall
-- ~80-85% precision@10
+**--extra** (Extra metadata search):
+- JSONPath-like query syntax
+- Supported operators: `>`, `>=`, `<`, `<=`, `==`, `contains`
+- Numeric and string comparisons
+- Examples:
+  - `asta-documents search ".year > 2020" --extra`
+  - `asta-documents search ".author contains Smith" --extra`
+  - `asta-documents search ".venue == NeurIPS" --extra`
 
 ## Output Formats
 
@@ -476,13 +254,9 @@ asta-documents cache stats
 1. **Use descriptive summaries**: They're indexed for search
 2. **Tag consistently**: Establish a tagging scheme
 3. **Use extra metadata**: Store author, year, venue for papers
-4. **Search with hybrid mode**: Best results if you have embeddings
-5. **Let fetch handle caching**: Don't manually check cache
-6. **Clean cache monthly**: Prevent disk usage buildup
-7. **Use JSON for scripting**: More reliable than parsing text
-8. **Use quiet mode in scripts**: `-q` suppresses progress messages
-9. **Commit index to git**: Share with your team
-10. **Use namespaces**: Auto-derived from git repo for portability
+4. **Let fetch handle caching**: Don't manually check cache
+5. **Use JSON for scripting**: More reliable than parsing text
+6. **Use quiet mode in scripts**: `-q` suppresses progress messages
 
 ## Troubleshooting
 
@@ -494,7 +268,7 @@ asta-documents cache stats
 **"Document not found"**
 - Verify URI: `asta-documents list --json | grep <partial-uri>`
 - Check namespace: URIs are namespace-specific
-- Ensure you're in correct directory (index is `.asta/documents/index.yaml`)
+- Ensure there is an index file at `.asta/documents/index.yaml`
 
 **"Fetch failed"**
 - Check URL is accessible: `curl -I <url>`
@@ -503,22 +277,15 @@ asta-documents cache stats
 
 **"Search returns no results"**
 - Try simpler query terms
-- Use `--mode=simple` for exact matching
+- Search by name or tags for exact matching:
+  - `asta-documents search "keyword" --name`
+  - `asta-documents search "tag" --tags`
 - Check if documents exist: `asta-documents list`
 
 **"Cache is large"**
 - Check size: `asta-documents cache stats`
 - Clean old entries: `asta-documents cache clean --days 7`
 - Clear if needed: `asta-documents cache clear -y`
-
-**"Semantic search not working"**
-- Reinstall with embeddings: `uv tool install --reinstall git+https://github.com/allenai/asta-resource-repo.git`
-- Check mode availability: Search will fall back automatically
-
-**"Skill not found in Claude Code"**
-- Verify skill is in `~/.claude/skills/asta-documents.md`
-- Restart Claude Code
-- Check skill frontmatter has correct format
 
 ## Updating
 
@@ -531,16 +298,6 @@ uv tool install --reinstall git+https://github.com/allenai/asta-resource-repo.gi
 ```bash
 curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/allenai/asta-resource-repo/main/skills/asta-documents.md
 ```
-
-## Notes
-
-- Index is at `.asta/documents/index.yaml` (git-friendly, commit to share with team)
-- Cache is at `.asta/documents/cache/` (gitignored, managed automatically)
-- Document URIs are stable within a git repository
-- All operations are safe (file locking prevents corruption)
-- Search cache auto-syncs when index changes
-- Content cache uses SHA256 of URL as key
-- For development, use `uv run asta-documents` from cloned repo
 
 ## Links
 
