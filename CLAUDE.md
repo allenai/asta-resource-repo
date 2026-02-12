@@ -907,6 +907,7 @@ The CLI converts exceptions to user-friendly error messages.
 - **Git-Friendly**: `.asta/documents/index.yaml` should be committed for team sharing
 - **Async/Await**: All document store operations are async for future extensibility
 - **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
+- **No Backward Compatibility Required**: This is an early-stage project with no production users yet. Make breaking changes freely when they improve the codebase. Don't add compatibility shims, deprecated code paths, or version checks. Clean refactoring is preferred over maintaining legacy behavior.
 
 ## Troubleshooting
 
