@@ -146,12 +146,22 @@ async def cmd_search(args: argparse.Namespace):
     config = load_config()
     store = config.document_store()
 
+    # Determine which field to search (default to summary)
+    search_field = "summary"
+    if args.name:
+        search_field = "name"
+    elif args.tags:
+        search_field = "tags"
+    elif args.extra:
+        search_field = "extra"
+
     try:
         async with store:
             hits = await store.search(
                 args.query,
                 limit=args.limit,
-                search_mode=args.mode if hasattr(args, "mode") else "auto",
+                search_mode="auto",
+                search_field=search_field,
             )
 
             if args.json:
@@ -161,14 +171,12 @@ async def cmd_search(args: argparse.Namespace):
                 if not hits:
                     print(f"No matches found for: {args.query}")
                 else:
-                    # Show search mode if not auto
-                    mode_info = (
-                        f" ({args.mode} search)"
-                        if hasattr(args, "mode") and args.mode != "auto"
-                        else ""
+                    # Show field being searched if not summary
+                    field_info = (
+                        f" (in {search_field})" if search_field != "summary" else ""
                     )
                     print(
-                        f"Found {len(hits)} match(es) for '{args.query}'{mode_info}:\n"
+                        f"Found {len(hits)} match(es) for '{args.query}'{field_info}:\n"
                     )
 
                     for hit in hits:
@@ -325,48 +333,6 @@ async def cmd_remove_tags(args: argparse.Namespace):
                     f"  Current tags: {', '.join(updated_doc.tags) if updated_doc.tags else '(none)'}"
                 )
                 print(f"  Modified: {updated_doc.modified_at.isoformat()}")
-
-    except (ValidationError, DocumentServiceError) as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
-async def cmd_list_by_tags(args: argparse.Namespace):
-    """List documents by tags"""
-    config = load_config()
-    store = config.document_store()
-
-    # Parse tags
-    if not args.tags:
-        print("Error: --tags is required", file=sys.stderr)
-        sys.exit(1)
-
-    tags = [tag.strip() for tag in args.tags.split(",")]
-
-    try:
-        async with store:
-            documents = await store.get_documents_by_tags(
-                tags, match_all=args.match_all
-            )
-
-            if args.json:
-                output = [doc.model_dump(mode="json") for doc in documents]
-                print(json.dumps(output, indent=2, default=str))
-            else:
-                if not documents:
-                    match_type = "all" if args.match_all else "any"
-                    print(
-                        f"No documents found with {match_type} of tags: {', '.join(tags)}"
-                    )
-                else:
-                    match_type = "all" if args.match_all else "any"
-                    print(
-                        f"Found {len(documents)} document(s) with {match_type} of tags [{', '.join(tags)}]:\n"
-                    )
-                    for doc in documents:
-                        print(format_document(doc, verbose=args.verbose))
-                        if args.verbose and doc != documents[-1]:
-                            print("-" * 60)
 
     except (ValidationError, DocumentServiceError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -819,8 +785,13 @@ Examples:
     --tags="ai,research,transformers" \\
     --mime-type="application/pdf"
 
-  # Search documents
+  # Search documents (searches summaries by default)
   asta-documents search "transformer"
+
+  # Search by specific field
+  asta-documents search "Attention" --name
+  asta-documents search "ai,nlp" --tags
+  asta-documents search ".year > 2020" --extra
 
   # Get specific document
   asta-documents get asta://owner/repo/UUID
@@ -838,12 +809,6 @@ Examples:
 
   # Remove tags from a document
   asta-documents remove-tags asta://owner/repo/UUID --tags="old,deprecated"
-
-  # List documents by tags (any tag matches)
-  asta-documents list-by-tags --tags="ai,ml"
-
-  # List documents by tags (all tags must match)
-  asta-documents list-by-tags --tags="ai,research" --match-all
 
   # Show index information
   asta-documents show
@@ -932,12 +897,30 @@ Examples:
         default=10,
         help="Maximum results (default: 10)",
     )
-    search_parser.add_argument(
-        "--mode",
-        choices=["auto", "simple", "keyword", "semantic", "hybrid"],
-        default="auto",
-        help="Search mode: auto (default, best available), simple (substring), keyword (BM25), semantic (embeddings), hybrid (BM25+embeddings)",
+
+    # Field selection (mutually exclusive)
+    field_group = search_parser.add_mutually_exclusive_group()
+    field_group.add_argument(
+        "--name",
+        action="store_true",
+        help="Search document names only",
     )
+    field_group.add_argument(
+        "--tags",
+        action="store_true",
+        help="Search tags only",
+    )
+    field_group.add_argument(
+        "--summary",
+        action="store_true",
+        help="Search summaries (default if no field specified)",
+    )
+    field_group.add_argument(
+        "--extra",
+        action="store_true",
+        help="Search extra metadata with JSONPath syntax",
+    )
+
     search_parser.add_argument(
         "--show-scores",
         action="store_true",
@@ -994,26 +977,6 @@ Examples:
         "--tags", required=True, help="Tags to remove (comma-separated)"
     )
     remove_tags_parser.set_defaults(func=cmd_remove_tags)
-
-    # list-by-tags command
-    list_by_tags_parser = subparsers.add_parser(
-        "list-by-tags", help="List documents by tags", parents=[parent_parser]
-    )
-    list_by_tags_parser.add_argument(
-        "--tags", required=True, help="Tags to filter by (comma-separated)"
-    )
-    list_by_tags_parser.add_argument(
-        "--match-all",
-        action="store_true",
-        help="Require all tags (default: any tag)",
-    )
-    list_by_tags_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show detailed information",
-    )
-    list_by_tags_parser.set_defaults(func=cmd_list_by_tags)
 
     # show command
     show_parser = subparsers.add_parser(

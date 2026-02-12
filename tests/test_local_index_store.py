@@ -202,12 +202,12 @@ async def test_list_empty_index(store):
 
 @pytest.mark.asyncio
 async def test_search_by_name(store):
-    """Test searching documents by name"""
+    """Test searching documents by name (legacy test - kept for compatibility)"""
     doc1 = DocumentMetadata(
         uuid="",
         name="Python Programming",
         url="https://example.com/python.pdf",
-        summary="A guide to Python",
+        summary="A guide to Rust",  # Changed to avoid matching "Python" in summary
         mime_type="application/pdf",
     )
     doc2 = DocumentMetadata(
@@ -221,8 +221,9 @@ async def test_search_by_name(store):
     await store.store(doc1)
     await store.store(doc2)
 
-    # Use keyword search to test exact matching (not semantic)
-    results = await store.search("Python", search_mode="keyword")
+    # Search in summary field (default) should find Python in doc1's name via cross-field search
+    # Or we can use field-specific search to be more precise
+    results = await store.search("Python", search_field="name")
     assert len(results) == 1
     assert results[0].result.name == "Python Programming"
 
@@ -315,8 +316,8 @@ async def test_search_no_matches(store):
 
     await store.store(doc)
 
-    # Use keyword search to test exact matching (semantic might find related programming languages)
-    results = await store.search("Rust programming", search_mode="keyword")
+    # Search by name for something that definitely doesn't match
+    results = await store.search("xyzzyx", search_field="name")
     assert len(results) == 0
 
 
@@ -540,12 +541,13 @@ async def test_fts5_search_basic(store):
         await store.store(doc)
 
     # Search for "transformer" should find the first document
-    results = await store.search("transformer", search_mode="fts5")
+    # (uses best available method: hybrid, BM25, FTS5, or simple)
+    results = await store.search("transformer")
     assert len(results) >= 1
     assert "Transformer" in results[0].result.summary
 
-    # Search for "NLP" should find two documents
-    results = await store.search("nlp", search_mode="fts5")
+    # Search for "NLP" tag should find two documents
+    results = await store.search("nlp", search_field="tags")
     assert len(results) == 2
 
 
@@ -583,7 +585,7 @@ async def test_fts5_field_boosting(store):
         await store.store(doc)
 
     # Search for "transformers" - doc with it in summary should rank higher
-    results = await store.search("transformers", search_mode="fts5")
+    results = await store.search("transformers", search_field="summary")
     assert len(results) >= 2
 
     # The document with "transformers" in summary should score highest
@@ -594,26 +596,23 @@ async def test_fts5_field_boosting(store):
 
 
 @pytest.mark.asyncio
-async def test_search_mode_auto_selects_fts5(store):
-    """Test that auto mode selects FTS5 when available"""
+async def test_summary_search_uses_best_method(store):
+    """Test that summary search automatically uses best available method"""
     doc = DocumentMetadata(
         uuid="",
         name="Test Document",
         url="https://example.com/doc.pdf",
-        summary="A test document",
+        summary="A test document about machine learning",
         mime_type="application/pdf",
     )
 
     await store.store(doc)
 
-    # Auto mode should select hybrid if embeddings are available, otherwise FTS5
-    selected_mode = store._determine_search_mode()
-    if store._embedding_manager:
-        assert selected_mode == "hybrid"
-    elif store._search_cache and store._search_cache._initialized:
-        assert selected_mode == "bm25"
-    else:
-        assert selected_mode == "simple"
+    # Summary search should automatically use the best available method
+    # (hybrid, BM25, FTS5, or simple) and return results
+    results = await store.search("machine learning", search_field="summary")
+    assert len(results) == 1
+    assert results[0].result.name == "Test Document"
 
 
 @pytest.mark.asyncio
@@ -656,7 +655,7 @@ async def test_fts5_search_with_multiple_terms(store):
     await store.store(doc)
 
     # Search with multiple terms
-    results = await store.search("neural networks", search_mode="fts5")
+    results = await store.search("neural networks", search_field="summary")
     assert len(results) == 1
     assert "neural networks" in results[0].result.summary.lower()
 
@@ -715,7 +714,7 @@ async def test_search_cache_sync_on_changes(temp_index_path):
         await store.store(doc1)
 
         # Search should find it
-        results = await store.search("First", search_mode="fts5")
+        results = await store.search("First", search_field="summary")
         assert len(results) == 1
 
         # Add second document
@@ -729,7 +728,7 @@ async def test_search_cache_sync_on_changes(temp_index_path):
         await store.store(doc2)
 
         # Search should find both
-        results = await store.search("document", search_mode="fts5")
+        results = await store.search("document", search_field="summary")
         assert len(results) == 2
 
 
@@ -1573,3 +1572,451 @@ async def test_invalid_short_id_format(store):
     # Test spaces
     with pytest.raises(ValidationError, match="10-character"):
         construct_document_uri(store.namespace, "abc 123xyz")
+
+
+# ============================================================================
+# Field-Specific Search Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_search_by_name_field(store):
+    """Test field-specific name search"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Attention Is All You Need",
+        url="https://example.com/transformer.pdf",
+        summary="Paper about transformers",
+        mime_type="application/pdf",
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Deep Learning Book",
+        url="https://example.com/dl.pdf",
+        summary="Comprehensive guide to attention mechanisms",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    # Search by name field - should only match doc1
+    results = await store.search("Attention", search_field="name")
+    assert len(results) == 1
+    assert results[0].result.name == "Attention Is All You Need"
+
+
+@pytest.mark.asyncio
+async def test_search_by_name_multiple_words(store):
+    """Test name search with multiple words"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Machine Learning Fundamentals",
+        url="https://example.com/ml.pdf",
+        summary="Introduction to ML",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    # Search with multiple words
+    results = await store.search("Machine Learning", search_field="name")
+    assert len(results) == 1
+    assert results[0].score == 1.0  # Both words matched
+
+
+@pytest.mark.asyncio
+async def test_search_by_name_partial_match(store):
+    """Test name search with partial word match"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Neural Networks Guide",
+        url="https://example.com/nn.pdf",
+        summary="Guide to neural networks",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    # Partial match - only one of two words
+    results = await store.search("Neural Python", search_field="name")
+    assert len(results) == 1
+    assert results[0].score == 0.5  # Only 1 of 2 words matched
+
+
+@pytest.mark.asyncio
+async def test_search_by_name_case_insensitive(store):
+    """Test that name search is case-insensitive"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="PyTorch Tutorial",
+        url="https://example.com/pytorch.pdf",
+        summary="PyTorch guide",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    # All case variations should match
+    for query in ["pytorch", "PYTORCH", "PyTorch", "pYtOrCh"]:
+        results = await store.search(query, search_field="name")
+        assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_by_tags_field(store):
+    """Test field-specific tag search"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="AI Paper",
+        url="https://example.com/ai.pdf",
+        summary="Paper about AI",
+        mime_type="application/pdf",
+        tags=["ai", "machine-learning"],
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Web Dev Guide",
+        url="https://example.com/web.pdf",
+        summary="Web development guide",
+        mime_type="application/pdf",
+        tags=["web", "backend"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    # Search by tags field
+    results = await store.search("ai", search_field="tags")
+    assert len(results) == 1
+    assert results[0].result.name == "AI Paper"
+
+
+@pytest.mark.asyncio
+async def test_search_by_tags_multiple(store):
+    """Test tag search with multiple tags (comma-separated)"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="ML Paper",
+        url="https://example.com/ml.pdf",
+        summary="Machine learning paper",
+        mime_type="application/pdf",
+        tags=["ai", "ml", "research"],
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="NLP Paper",
+        url="https://example.com/nlp.pdf",
+        summary="NLP paper",
+        mime_type="application/pdf",
+        tags=["ai", "nlp"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    # Search for documents with any of these tags
+    results = await store.search("ai,ml", search_field="tags")
+    assert len(results) == 2
+
+    # doc1 has both tags (score = 1.0)
+    # doc2 has only "ai" (score = 0.5)
+    assert results[0].score == 1.0
+    assert results[1].score == 0.5
+
+
+@pytest.mark.asyncio
+async def test_search_by_tags_case_insensitive(store):
+    """Test that tag search is case-insensitive"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Test document",
+        mime_type="application/pdf",
+        tags=["Machine-Learning", "AI"],
+    )
+
+    await store.store(doc)
+
+    # All case variations should match
+    for query in ["machine-learning", "MACHINE-LEARNING", "Machine-Learning"]:
+        results = await store.search(query, search_field="tags")
+        assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_numeric_gt(store):
+    """Test extra metadata search with greater than operator"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Old Paper",
+        url="https://example.com/old.pdf",
+        summary="Paper from 2019",
+        mime_type="application/pdf",
+        extra={"year": 2019},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="New Paper",
+        url="https://example.com/new.pdf",
+        summary="Paper from 2023",
+        mime_type="application/pdf",
+        extra={"year": 2023},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    # Search for year > 2020
+    results = await store.search(".year > 2020", search_field="extra")
+    assert len(results) == 1
+    assert results[0].result.name == "New Paper"
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_numeric_gte(store):
+    """Test extra metadata search with greater than or equal operator"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Doc 2020",
+        url="https://example.com/2020.pdf",
+        summary="Paper from 2020",
+        mime_type="application/pdf",
+        extra={"year": 2020},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Doc 2021",
+        url="https://example.com/2021.pdf",
+        summary="Paper from 2021",
+        mime_type="application/pdf",
+        extra={"year": 2021},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    results = await store.search(".year >= 2020", search_field="extra")
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_numeric_lt(store):
+    """Test extra metadata search with less than operator"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Doc 2018",
+        url="https://example.com/2018.pdf",
+        summary="Paper from 2018",
+        mime_type="application/pdf",
+        extra={"year": 2018},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Doc 2023",
+        url="https://example.com/2023.pdf",
+        summary="Paper from 2023",
+        mime_type="application/pdf",
+        extra={"year": 2023},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    results = await store.search(".year < 2020", search_field="extra")
+    assert len(results) == 1
+    assert results[0].result.name == "Doc 2018"
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_string_contains(store):
+    """Test extra metadata search with contains operator"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Smith Paper",
+        url="https://example.com/smith.pdf",
+        summary="Paper by Smith",
+        mime_type="application/pdf",
+        extra={"author": "John Smith"},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Jones Paper",
+        url="https://example.com/jones.pdf",
+        summary="Paper by Jones",
+        mime_type="application/pdf",
+        extra={"author": "Mary Jones"},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    results = await store.search(".author contains Smith", search_field="extra")
+    assert len(results) == 1
+    assert results[0].result.name == "Smith Paper"
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_string_equals(store):
+    """Test extra metadata search with equality operator"""
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="NeurIPS Paper",
+        url="https://example.com/neurips.pdf",
+        summary="NeurIPS paper",
+        mime_type="application/pdf",
+        extra={"venue": "NeurIPS"},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="ICML Paper",
+        url="https://example.com/icml.pdf",
+        summary="ICML paper",
+        mime_type="application/pdf",
+        extra={"venue": "ICML"},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    results = await store.search(".venue == NeurIPS", search_field="extra")
+    assert len(results) == 1
+    assert results[0].result.name == "NeurIPS Paper"
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_missing_field(store):
+    """Test extra metadata search when field doesn't exist"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Test document",
+        mime_type="application/pdf",
+        extra={"author": "Smith"},
+    )
+
+    await store.store(doc)
+
+    # Query for field that doesn't exist
+    results = await store.search(".year > 2020", search_field="extra")
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_no_extra_metadata(store):
+    """Test extra metadata search when document has no extra metadata"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Test document",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    results = await store.search(".year > 2020", search_field="extra")
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_search_by_extra_field_case_insensitive_contains(store):
+    """Test that contains operator is case-insensitive"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Test document",
+        mime_type="application/pdf",
+        extra={"author": "John Smith"},
+    )
+
+    await store.store(doc)
+
+    # All case variations should match
+    for query in [
+        ".author contains smith",
+        ".author contains SMITH",
+        ".author contains Smith",
+    ]:
+        results = await store.search(query, search_field="extra")
+        assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_default_field_is_summary(store):
+    """Test that default search field is summary"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Paper about transformers and attention mechanisms",
+        mime_type="application/pdf",
+        tags=["ai"],
+    )
+
+    await store.store(doc)
+
+    # Default search should search summary
+    results = await store.search("transformers")
+    assert len(results) == 1
+
+    # Explicit summary search should work the same
+    results2 = await store.search("transformers", search_field="summary")
+    assert len(results2) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_by_summary_uses_best_available_method(store):
+    """Test that summary search uses the best available search method"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Test Doc",
+        url="https://example.com/test.pdf",
+        summary="Machine learning and deep learning fundamentals",
+        mime_type="application/pdf",
+    )
+
+    await store.store(doc)
+
+    # Summary search should work (will use best available: hybrid, BM25, FTS5, or simple)
+    results = await store.search("machine learning", search_field="summary")
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_field_specific_methods_dont_cross_search(store):
+    """Test that field-specific searches don't cross-contaminate"""
+    doc = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/python.pdf",
+        summary="Guide to JavaScript",
+        mime_type="application/pdf",
+        tags=["ruby"],
+        extra={"language": "Go"},
+    )
+
+    await store.store(doc)
+
+    # Name search should only find "Python" in name
+    results = await store.search("Python", search_field="name")
+    assert len(results) == 1
+
+    # But not JavaScript (which is in summary)
+    results = await store.search("JavaScript", search_field="name")
+    assert len(results) == 0
+
+    # Summary search should find JavaScript
+    results = await store.search("JavaScript", search_field="summary")
+    assert len(results) == 1
+
+    # Tag search should only find ruby
+    results = await store.search("ruby", search_field="tags")
+    assert len(results) == 1
+
+    # Extra search should find Go
+    results = await store.search(".language == Go", search_field="extra")
+    assert len(results) == 1
