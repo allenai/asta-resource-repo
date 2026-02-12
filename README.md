@@ -193,7 +193,7 @@ When your team pulls the changes, they'll have:
 Each document has:
 
 **Required:**
-- `url` - Where the document lives (any HTTP/HTTPS URL)
+- `url` - Where the document lives (supported protocols: `http://`, `https://`, `file://`)
 - `name` - Document title
 - `summary` - Description (used for search)
 - `mime_type` - Document type (e.g., `application/pdf`, `text/html`)
