@@ -14,14 +14,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from ..config import load_config
-from ..model import DocumentMetadata
+from ..model import DocumentMetadata, construct_document_uri
 from ..exceptions import ValidationError, DocumentServiceError
 
 
 def format_document(doc: DocumentMetadata, verbose: bool = False) -> str:
     """Format a document for display"""
     if verbose:
-        return f"""URI: {doc.uri}
+        return f"""UUID: {doc.uuid}
+URI: {doc.uri}
 Name: {doc.name}
 URL: {doc.url}
 Summary: {doc.summary}
@@ -33,7 +34,7 @@ Extra: {json.dumps(doc.extra, indent=2) if doc.extra else '(none)'}
 """
     else:
         tags_str = f"[{', '.join(doc.tags)}]" if doc.tags else ""
-        return f"{doc.uri}: {doc.name} {tags_str}"
+        return f"{doc.uuid}: {doc.name} {tags_str}"
 
 
 async def cmd_list(args: argparse.Namespace):
@@ -119,16 +120,18 @@ async def cmd_add(args: argparse.Namespace):
 
 
 async def cmd_get(args: argparse.Namespace):
-    """Get a document by URI"""
+    """Get a document by UUID"""
     config = load_config()
     store = config.document_store()
 
     try:
         async with store:
-            doc = await store.get(args.uri)
+            # Construct URI from namespace + UUID
+            uri = construct_document_uri(store.namespace, args.uuid)
+            doc = await store.get(uri)
 
             if doc is None:
-                print(f"Document not found: {args.uri}", file=sys.stderr)
+                print(f"Document not found: {args.uuid}", file=sys.stderr)
                 sys.exit(1)
 
             if args.json:
@@ -215,9 +218,12 @@ async def cmd_update(args: argparse.Namespace):
 
     try:
         async with store:
+            # Construct URI from namespace + UUID
+            uri = construct_document_uri(store.namespace, args.uuid)
+
             # Update document
             updated_doc = await store.update(
-                uri=args.uri,
+                uri=uri,
                 name=args.name,
                 url=args.url,
                 summary=args.summary,
@@ -233,7 +239,7 @@ async def cmd_update(args: argparse.Namespace):
                     )
                 )
             else:
-                print(f"✓ Document updated: {args.uri}")
+                print(f"✓ Document updated: {args.uuid}")
                 print(f"  Name: {updated_doc.name}")
                 print(f"  URL: {updated_doc.url}")
                 if updated_doc.tags:
@@ -246,24 +252,28 @@ async def cmd_update(args: argparse.Namespace):
 
 
 async def cmd_remove(args: argparse.Namespace):
-    """Remove a document by URI"""
+    """Remove a document by UUID"""
     config = load_config()
     store = config.document_store()
 
     try:
         async with store:
-            deleted = await store.delete(args.uri)
+            # Construct URI from namespace + UUID
+            uri = construct_document_uri(store.namespace, args.uuid)
+            deleted = await store.delete(uri)
 
             if deleted:
                 if args.json:
-                    print(json.dumps({"status": "deleted", "uri": args.uri}))
+                    print(
+                        json.dumps({"status": "deleted", "uuid": args.uuid, "uri": uri})
+                    )
                 else:
-                    print(f"✓ Document removed: {args.uri}")
+                    print(f"✓ Document removed: {args.uuid}")
             else:
                 if args.json:
-                    print(json.dumps({"status": "not_found", "uri": args.uri}))
+                    print(json.dumps({"status": "not_found", "uuid": args.uuid}))
                 else:
-                    print(f"Document not found: {args.uri}", file=sys.stderr)
+                    print(f"Document not found: {args.uuid}", file=sys.stderr)
                     sys.exit(1)
 
     except (ValidationError, DocumentServiceError) as e:
@@ -285,7 +295,9 @@ async def cmd_add_tags(args: argparse.Namespace):
 
     try:
         async with store:
-            updated_doc = await store.add_tags(args.uri, tags)
+            # Construct URI from namespace + UUID
+            uri = construct_document_uri(store.namespace, args.uuid)
+            updated_doc = await store.add_tags(uri, tags)
 
             if args.json:
                 print(
@@ -294,7 +306,7 @@ async def cmd_add_tags(args: argparse.Namespace):
                     )
                 )
             else:
-                print(f"✓ Tags added to document: {args.uri}")
+                print(f"✓ Tags added to document: {args.uuid}")
                 print(f"  Added: {', '.join(tags)}")
                 print(f"  Current tags: {', '.join(updated_doc.tags)}")
                 print(f"  Modified: {updated_doc.modified_at.isoformat()}")
@@ -318,7 +330,9 @@ async def cmd_remove_tags(args: argparse.Namespace):
 
     try:
         async with store:
-            updated_doc = await store.remove_tags(args.uri, tags)
+            # Construct URI from namespace + UUID
+            uri = construct_document_uri(store.namespace, args.uuid)
+            updated_doc = await store.remove_tags(uri, tags)
 
             if args.json:
                 print(
@@ -327,7 +341,7 @@ async def cmd_remove_tags(args: argparse.Namespace):
                     )
                 )
             else:
-                print(f"✓ Tags removed from document: {args.uri}")
+                print(f"✓ Tags removed from document: {args.uuid}")
                 print(f"  Removed: {', '.join(tags)}")
                 print(
                     f"  Current tags: {', '.join(updated_doc.tags) if updated_doc.tags else '(none)'}"
@@ -349,16 +363,12 @@ async def cmd_show(args: argparse.Namespace):
 
         if args.json:
             info = {
-                "index_path": str(getattr(store, "index_path", "N/A")),
-                "namespace": getattr(store, "namespace", "N/A"),
                 "total_documents": len(documents),
             }
             print(json.dumps(info, indent=2))
         else:
             print("Document Index Information")
             print("=" * 60)
-            print(f"Index path: {getattr(store, 'index_path', 'N/A')}")
-            print(f"Namespace: {getattr(store, 'namespace', 'N/A')}")
             print(f"Total documents: {len(documents)}")
 
 
@@ -679,10 +689,12 @@ async def cmd_fetch(args: argparse.Namespace):
     store = config.document_store()
 
     async with store:
-        doc = await store.get(args.uri)
+        # Construct URI from namespace + UUID
+        uri = construct_document_uri(store.namespace, args.uuid)
+        doc = await store.get(uri)
 
         if doc is None:
-            print(f"Error: Document not found: {args.uri}", file=sys.stderr)
+            print(f"Error: Document not found: {args.uuid}", file=sys.stderr)
             sys.exit(1)
 
         url = doc.url
@@ -734,7 +746,7 @@ async def cmd_fetch(args: argparse.Namespace):
                         "%Y-%m-%dT%H:%M:%SZ"
                     ),
                     "content_type": mime_type,
-                    "document_uri": args.uri,
+                    "document_uri": uri,
                     "file_size": len(content),
                 }
                 with open(metadata_file, "w") as f:
@@ -794,27 +806,27 @@ Examples:
   asta-documents search ".year > 2020" --extra
 
   # Get specific document
-  asta-documents get asta://owner/repo/UUID
+  asta-documents get 6MNxGbWGRC
 
   # Update document metadata
-  asta-documents update asta://owner/repo/UUID \\
+  asta-documents update 6MNxGbWGRC \\
     --name="New Title" \\
     --tags="ai,updated"
 
   # Remove document
-  asta-documents remove asta://owner/repo/UUID
+  asta-documents remove 6MNxGbWGRC
 
   # Add tags to a document
-  asta-documents add-tags asta://owner/repo/UUID --tags="ai,updated"
+  asta-documents add-tags 6MNxGbWGRC --tags="ai,updated"
 
   # Remove tags from a document
-  asta-documents remove-tags asta://owner/repo/UUID --tags="old,deprecated"
+  asta-documents remove-tags 6MNxGbWGRC --tags="old,deprecated"
 
   # Show index information
   asta-documents show
 
   # Fetch document content (with caching)
-  asta-documents fetch asta://owner/repo/UUID -o document.pdf
+  asta-documents fetch 6MNxGbWGRC -o document.pdf
 
   # Cache management
   asta-documents cache list            # List cached items
@@ -881,9 +893,9 @@ Examples:
 
     # get command
     get_parser = subparsers.add_parser(
-        "get", help="Get document by URI", parents=[parent_parser]
+        "get", help="Get document by UUID", parents=[parent_parser]
     )
-    get_parser.add_argument("uri", help="Document URI")
+    get_parser.add_argument("uuid", help="Document UUID (10-character alphanumeric ID)")
     get_parser.set_defaults(func=cmd_get)
 
     # search command
@@ -938,7 +950,9 @@ Examples:
     update_parser = subparsers.add_parser(
         "update", help="Update document metadata", parents=[parent_parser]
     )
-    update_parser.add_argument("uri", help="Document URI to update")
+    update_parser.add_argument(
+        "uuid", help="Document UUID (10-character alphanumeric ID)"
+    )
     update_parser.add_argument("--name", help="New document name")
     update_parser.add_argument("--url", help="New document URL")
     update_parser.add_argument("--summary", help="New document summary")
@@ -953,16 +967,20 @@ Examples:
 
     # remove command
     remove_parser = subparsers.add_parser(
-        "remove", help="Remove document by URI", parents=[parent_parser]
+        "remove", help="Remove document by UUID", parents=[parent_parser]
     )
-    remove_parser.add_argument("uri", help="Document URI to remove")
+    remove_parser.add_argument(
+        "uuid", help="Document UUID (10-character alphanumeric ID)"
+    )
     remove_parser.set_defaults(func=cmd_remove)
 
     # add-tags command
     add_tags_parser = subparsers.add_parser(
         "add-tags", help="Add tags to a document", parents=[parent_parser]
     )
-    add_tags_parser.add_argument("uri", help="Document URI")
+    add_tags_parser.add_argument(
+        "uuid", help="Document UUID (10-character alphanumeric ID)"
+    )
     add_tags_parser.add_argument(
         "--tags", required=True, help="Tags to add (comma-separated)"
     )
@@ -972,7 +990,9 @@ Examples:
     remove_tags_parser = subparsers.add_parser(
         "remove-tags", help="Remove tags from a document", parents=[parent_parser]
     )
-    remove_tags_parser.add_argument("uri", help="Document URI")
+    remove_tags_parser.add_argument(
+        "uuid", help="Document UUID (10-character alphanumeric ID)"
+    )
     remove_tags_parser.add_argument(
         "--tags", required=True, help="Tags to remove (comma-separated)"
     )
@@ -988,7 +1008,9 @@ Examples:
     fetch_parser = subparsers.add_parser(
         "fetch", help="Fetch document content with caching"
     )
-    fetch_parser.add_argument("uri", help="Document URI (asta://...)")
+    fetch_parser.add_argument(
+        "uuid", help="Document UUID (10-character alphanumeric ID)"
+    )
     fetch_parser.add_argument("-o", "--output", help="Output file (default: stdout)")
     fetch_parser.add_argument(
         "--force", action="store_true", help="Force refresh, ignore cache"
