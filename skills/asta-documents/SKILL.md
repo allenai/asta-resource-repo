@@ -34,13 +34,17 @@ Add `--json` flag to any command for machine-readable output.
 asta-documents list
 asta-documents list --tags="ai,research"
 
-# Search document summaries
-asta-documents search "query"
+# Search documents (by field)
+asta-documents search --summary="query"
+asta-documents search --name="title words"
+asta-documents search --tags="ai,nlp"
+asta-documents search --extra=".year > 2020"
 
-# Search by specific field
-asta-documents search "title words" --name
-asta-documents search "ai,nlp" --tags
-asta-documents search ".year > 2020" --extra
+# Multi-field search (intersection - matches ALL)
+asta-documents search --summary="transformers" --tags="ai"
+
+# Multi-field search (union - matches ANY)
+asta-documents search --summary="transformers" --name="BERT" --union
 
 # Add document
 asta-documents add <url> --name="Title" --summary="Description" --tags="tag1,tag2" --extra='{"author": "Smith et al", "year": 2024, "venue": "NeurIPS"}'
@@ -127,7 +131,7 @@ asta-documents fetch "$UUID" --index-path /tmp/remote-index.yaml -o /tmp/documen
 # Assume TEMP_INDEX points to the downloaded index file
 
 # Search remote index
-asta-documents search "query" --index-path "$TEMP_INDEX"
+asta-documents search --summary="query" --index-path "$TEMP_INDEX"
 
 # List all documents in remote index
 asta-documents list --index-path "$TEMP_INDEX"
@@ -136,7 +140,7 @@ asta-documents list --index-path "$TEMP_INDEX"
 asta-documents get "$UUID" --index-path "$TEMP_INDEX"
 
 # Search and fetch from remote index
-asta-documents search "transformers" --index-path "$TEMP_INDEX" --show-scores
+asta-documents search --summary="transformers" --index-path "$TEMP_INDEX" --show-scores
 asta-documents fetch "$UUID" --index-path "$TEMP_INDEX" -o result.pdf
 ```
 
@@ -233,14 +237,14 @@ asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
   --extra='{"author": "Vaswani et al", "year": 2017, "venue": "NeurIPS"}'
 
 # Search papers by tag
-asta-documents search "transformers" --tags
+asta-documents search --tags="transformers"
 ```
 
 ### Workflow 2: Search and Fetch
 
 ```bash
 # Search for relevant documents
-asta-documents search "transformer architecture" --show-scores
+asta-documents search --summary="transformer architecture" --show-scores
 
 # Get metadata for top result (using UUID from search results)
 asta-documents get 6MNxGbWGRC
@@ -256,7 +260,7 @@ asta-documents fetch 6MNxGbWGRC -o /tmp/paper.pdf -q
 
 ```bash
 # Search and extract UUIDs
-RESULTS=$(asta-documents search "query" --json)
+RESULTS=$(asta-documents search --summary="query" --json)
 
 # Get first UUID (example with Python)
 UUID=$(echo "$RESULTS" | python3 -c "import sys,json; results=json.load(sys.stdin); print(results[0]['result']['uuid'] if results else '')")
@@ -309,23 +313,11 @@ asta-documents cache stats
 
 ## Field-Specific Search
 
-Asta uses different search strategies optimized for each document field:
+Asta uses different search strategies optimized for each document field. You can search single fields or combine multiple fields with intersection/union modes.
 
-**--name** (Name search):
-- Simple case-insensitive word matching
-- Splits query into words, matches any word in name
-- Score = (matched words / total query words)
-- Fast, no indexing needed
-- Example: `asta-documents search "Attention" --name`
+### Single Field Search
 
-**--tags** (Tag search):
-- Comma-separated tag matching
-- Case-insensitive
-- Score = (matched tags / total query tags)
-- Finds documents with any matching tags
-- Example: `asta-documents search "ai,nlp" --tags`
-
-**--summary** (Summary search, default):
+**--summary** (Summary search):
 - Uses best available method automatically:
   - Hybrid (BM25 + semantic embeddings) → best quality
   - BM25 (keyword relevance ranking) → fast indexed
@@ -333,16 +325,78 @@ Asta uses different search strategies optimized for each document field:
   - Simple (substring matching) → always available
 - Optimized for natural language queries
 - Understands semantic meaning
-- Example: `asta-documents search "papers about transformers"`
+- Produces relevance scores for ranking
+- Example: `asta-documents search --summary="papers about transformers"`
+
+**--name** (Name search):
+- Simple case-insensitive word matching
+- Splits query into words, matches any word in name
+- Score = (matched words / total query words)
+- Fast, no indexing needed
+- Produces match scores for ranking
+- Example: `asta-documents search --name="Attention"`
+
+**--tags** (Tag search):
+- Comma-separated tag matching
+- Case-insensitive
+- Acts as a filter (no meaningful relevance scores)
+- Finds documents with any matching tags
+- Example: `asta-documents search --tags="ai,nlp"`
 
 **--extra** (Extra metadata search):
 - JSONPath-like query syntax
 - Supported operators: `>`, `>=`, `<`, `<=`, `==`, `contains`
 - Numeric and string comparisons
+- Acts as a filter (no meaningful relevance scores)
 - Examples:
-  - `asta-documents search ".year > 2020" --extra`
-  - `asta-documents search ".author contains Smith" --extra`
-  - `asta-documents search ".venue == NeurIPS" --extra`
+  - `asta-documents search --extra=".year > 2020"`
+  - `asta-documents search --extra=".author contains Smith"`
+  - `asta-documents search --extra=".venue == NeurIPS"`
+
+### Multi-Field Search
+
+Combine multiple field queries to create powerful filtered searches:
+
+**Intersection mode (default)**:
+- Returns documents matching ALL specified field queries
+- Example: `asta-documents search --summary="transformers" --tags="ai"`
+- Only returns documents where summary contains "transformers" AND tags include "ai"
+
+**Union mode (`--union` flag)**:
+- Returns documents matching ANY specified field query
+- Example: `asta-documents search --summary="transformers" --name="BERT" --union`
+- Returns documents where summary contains "transformers" OR name contains "BERT"
+
+**Hierarchical Scoring**:
+
+Results are sorted using a priority hierarchy where tags/extra act as filters:
+
+1. **Summary score** (highest priority) - if `--summary` present
+   - Uses semantic/hybrid search relevance
+   - Best for natural language queries
+
+2. **Name score** (medium priority) - if `--name` present
+   - Uses word-matching score
+   - Used when no summary query
+
+3. **Created timestamp** (lowest priority) - if only `--tags` or `--extra`
+   - Sorts by creation time (newest first)
+   - Only used when no summary/name queries
+
+**Examples**:
+```bash
+# Summary + tags: Sorted by summary relevance (tags filter)
+asta-documents search --summary="machine learning" --tags="ai"
+
+# Name + tags: Sorted by name word-match (tags filter)
+asta-documents search --name="Python" --tags="programming"
+
+# Tags only: Sorted by creation timestamp
+asta-documents search --tags="research"
+
+# Three fields: Summary ranks, name and extra filter
+asta-documents search --summary="transformers" --name="Attention" --extra=".year > 2015"
+```
 
 ## Output Formats
 
@@ -390,9 +444,10 @@ Asta uses different search strategies optimized for each document field:
 **"Search returns no results"**
 - Try simpler query terms
 - Search by name or tags for exact matching:
-  - `asta-documents search "keyword" --name`
-  - `asta-documents search "tag" --tags`
+  - `asta-documents search --name="keyword"`
+  - `asta-documents search --tags="tag"`
 - Check if documents exist: `asta-documents list`
+- Try union mode if using multiple fields: `--union`
 
 **"Cache is large"**
 - Check size: `asta-documents cache stats`
