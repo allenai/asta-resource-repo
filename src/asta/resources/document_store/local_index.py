@@ -352,6 +352,171 @@ class LocalIndexDocumentStore(DocumentStore):
             # Default: summary field
             return await self._search_by_summary(query, limit)
 
+    async def multi_field_search(
+        self,
+        field_queries: dict[str, str],
+        limit: int = 10,
+        combine_mode: str = "intersection",
+    ) -> list[SearchHit]:
+        """Search multiple fields and combine results
+
+        Executes separate searches for each field and combines results using
+        either intersection (documents matching ALL queries) or union
+        (documents matching ANY query).
+
+        Args:
+            field_queries: Dict mapping field names to query strings
+                          e.g., {"summary": "transformers", "tags": "ai,nlp"}
+            limit: Maximum number of results to return
+            combine_mode: "intersection" (default) or "union"
+
+        Returns:
+            List of search hits with combined scores
+
+        Raises:
+            ValueError: If field_queries is empty or combine_mode is invalid
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if not field_queries:
+            raise ValueError("field_queries cannot be empty")
+
+        if combine_mode not in ("intersection", "union"):
+            raise ValueError(f"Invalid combine_mode: {combine_mode}")
+
+        # Execute search for each field
+        all_results: dict[str, list[SearchHit]] = {}
+        for field, query in field_queries.items():
+            if field == "name":
+                results = await self._search_by_name(
+                    query, limit=None
+                )  # Get all results for combining
+            elif field == "tags":
+                results = await self._search_by_tags(query, limit=None)
+            elif field == "summary":
+                results = await self._search_by_summary(query, limit=None)
+            elif field == "extra":
+                results = await self._search_by_extra(query, limit=None)
+            else:
+                raise ValueError(f"Invalid field: {field}")
+
+            all_results[field] = results
+
+        # Combine results based on mode
+        if combine_mode == "intersection":
+            combined = self._combine_intersection(all_results)
+        else:  # union
+            combined = self._combine_union(all_results)
+
+        # Sort by combined score (descending) and limit
+        combined.sort(key=lambda x: x.score, reverse=True)
+        return combined[:limit]
+
+    def _combine_intersection(
+        self, field_results: dict[str, list[SearchHit]]
+    ) -> list[SearchHit]:
+        """Combine search results using intersection
+
+        Only returns documents that appear in ALL field results.
+        Tags and extra fields act as filters. Sort order determined by:
+        1. Summary score (if summary query present)
+        2. Name score (if name query present)
+        3. Document created_at timestamp
+
+        Args:
+            field_results: Dict mapping field names to search results
+
+        Returns:
+            List of search hits appearing in all result sets
+        """
+        if not field_results:
+            return []
+
+        # Find documents that appear in all result sets
+        # Track scores separately by field type
+        doc_matches: dict[str, dict[str, float]] = {}  # uuid -> {field: score}
+
+        for field, hits in field_results.items():
+            for hit in hits:
+                uuid = hit.result.uuid
+                if uuid not in doc_matches:
+                    doc_matches[uuid] = {}
+                doc_matches[uuid][field] = hit.score
+
+        # Filter to documents appearing in all fields (intersection)
+        num_fields = len(field_results)
+        combined = []
+        for uuid, field_scores in doc_matches.items():
+            if len(field_scores) == num_fields:
+                # Determine score based on hierarchy:
+                # 1. Summary score (semantic relevance)
+                # 2. Name score (word matching)
+                # 3. Created timestamp (for sorting)
+                if "summary" in field_scores:
+                    score = field_scores["summary"]
+                elif "name" in field_scores:
+                    score = field_scores["name"]
+                else:
+                    # Use timestamp for sorting (tags/extra only)
+                    # Convert to float for score field
+                    score = float(self._documents[uuid].created_at.timestamp())
+
+                combined.append(SearchHit(result=self._documents[uuid], score=score))
+
+        return combined
+
+    def _combine_union(
+        self, field_results: dict[str, list[SearchHit]]
+    ) -> list[SearchHit]:
+        """Combine search results using union
+
+        Returns all documents from any field result.
+        Tags and extra fields act as filters. Sort order determined by:
+        1. Summary score (if summary query present)
+        2. Name score (if name query present)
+        3. Document created_at timestamp
+
+        Args:
+            field_results: Dict mapping field names to search results
+
+        Returns:
+            List of all unique search hits
+        """
+        if not field_results:
+            return []
+
+        # Track scores by field type for each document
+        doc_scores: dict[str, dict[str, float]] = {}  # uuid -> {field: score}
+
+        for field, hits in field_results.items():
+            for hit in hits:
+                uuid = hit.result.uuid
+                if uuid not in doc_scores:
+                    doc_scores[uuid] = {}
+                # For union, keep the score from each field (documents may match multiple)
+                if field not in doc_scores[uuid] or hit.score > doc_scores[uuid][field]:
+                    doc_scores[uuid][field] = hit.score
+
+        # Create SearchHit objects with hierarchical scoring
+        combined = []
+        for uuid, field_scores in doc_scores.items():
+            # Determine score based on hierarchy:
+            # 1. Summary score (semantic relevance)
+            # 2. Name score (word matching)
+            # 3. Created timestamp (for sorting)
+            if "summary" in field_scores:
+                score = field_scores["summary"]
+            elif "name" in field_scores:
+                score = field_scores["name"]
+            else:
+                # Use timestamp for sorting (tags/extra only)
+                score = float(self._documents[uuid].created_at.timestamp())
+
+            combined.append(SearchHit(result=self._documents[uuid], score=score))
+
+        return combined
+
     async def _search_by_summary(self, query: str, limit: int = 10) -> list[SearchHit]:
         """Search document summaries using semantic/hybrid search
 

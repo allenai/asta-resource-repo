@@ -1866,3 +1866,379 @@ async def test_search_field_specific_methods_dont_cross_search(store):
     # Extra search should find Go
     results = await store.search(".language == Go", search_field="extra")
     assert len(results) == 1
+
+
+# ============================================================================
+# Multi-Field Search Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_intersection(store):
+    """Test multi-field search with intersection mode"""
+    # Add documents with overlapping attributes
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/python.pdf",
+        summary="A guide to Python programming with machine learning",
+        mime_type="application/pdf",
+        tags=["python", "ml"],
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Machine Learning Basics",
+        url="https://example.com/ml.pdf",
+        summary="Introduction to machine learning",
+        mime_type="application/pdf",
+        tags=["ml", "ai"],
+    )
+    doc3 = DocumentMetadata(
+        uuid="",
+        name="Python for Data Science",
+        url="https://example.com/datascience.pdf",
+        summary="Python programming for data analysis",
+        mime_type="application/pdf",
+        tags=["python", "data"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+    await store.store(doc3)
+
+    # Search for documents with "Python" in name AND "ml" in tags
+    # Should only match doc1
+    results = await store.multi_field_search(
+        field_queries={"name": "Python", "tags": "ml"},
+        combine_mode="intersection",
+    )
+
+    assert len(results) == 1
+    assert results[0].result.name == "Python Programming"
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_union(store):
+    """Test multi-field search with union mode"""
+    # Add documents
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/python.pdf",
+        summary="A guide to Python programming",
+        mime_type="application/pdf",
+        tags=["python"],
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Machine Learning Basics",
+        url="https://example.com/ml.pdf",
+        summary="Introduction to machine learning",
+        mime_type="application/pdf",
+        tags=["ml"],
+    )
+    doc3 = DocumentMetadata(
+        uuid="",
+        name="Data Science Guide",
+        url="https://example.com/datascience.pdf",
+        summary="Comprehensive data science guide",
+        mime_type="application/pdf",
+        tags=["data"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+    await store.store(doc3)
+
+    # Search for documents with "Python" in name OR "ml" in tags
+    # Should match doc1 (name) and doc2 (tags)
+    results = await store.multi_field_search(
+        field_queries={"name": "Python", "tags": "ml"},
+        combine_mode="union",
+    )
+
+    assert len(results) == 2
+    names = {r.result.name for r in results}
+    assert "Python Programming" in names
+    assert "Machine Learning Basics" in names
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_three_fields_intersection(store):
+    """Test multi-field search with three fields in intersection mode"""
+    # Add documents
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Attention Mechanism",
+        url="https://example.com/attention.pdf",
+        summary="Paper about attention mechanisms in transformers",
+        mime_type="application/pdf",
+        tags=["ai", "nlp"],
+        extra={"year": 2020},
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Transformers Explained",
+        url="https://example.com/transformers.pdf",
+        summary="Understanding transformer architecture",
+        mime_type="application/pdf",
+        tags=["ai", "nlp"],
+        extra={"year": 2019},
+    )
+    doc3 = DocumentMetadata(
+        uuid="",
+        name="BERT Paper",
+        url="https://example.com/bert.pdf",
+        summary="BERT pretraining paper",
+        mime_type="application/pdf",
+        tags=["ai"],
+        extra={"year": 2020},
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+    await store.store(doc3)
+
+    # Search with three conditions (intersection)
+    # summary contains "transformers", tags contains "nlp", and year > 2019
+    results = await store.multi_field_search(
+        field_queries={
+            "summary": "transformers",
+            "tags": "nlp",
+            "extra": ".year > 2019",
+        },
+        combine_mode="intersection",
+    )
+
+    # Only doc1 matches all three conditions
+    assert len(results) == 1
+    assert results[0].result.name == "Attention Mechanism"
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_scores_combined(store):
+    """Test that multi-field search uses hierarchical scoring"""
+    # Add document
+    doc = DocumentMetadata(
+        uuid="",
+        name="Machine Learning",
+        url="https://example.com/ml.pdf",
+        summary="A comprehensive guide to machine learning algorithms",
+        mime_type="application/pdf",
+        tags=["ml", "ai"],
+    )
+    await store.store(doc)
+
+    # Search with name and tags - should use name score (tags are filters)
+    results = await store.multi_field_search(
+        field_queries={"name": "Machine Learning", "tags": "ml"},
+        combine_mode="intersection",
+    )
+
+    assert len(results) == 1
+    # Score should be from name field (word matching)
+    assert results[0].score > 0
+
+    # Search with summary and tags - should use summary score
+    results_summary = await store.multi_field_search(
+        field_queries={"summary": "machine learning", "tags": "ml"},
+        combine_mode="intersection",
+    )
+
+    assert len(results_summary) == 1
+    # Both should have positive scores
+    assert results_summary[0].score > 0
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_union_uses_hierarchical_scoring(store):
+    """Test that union mode uses hierarchical scoring (summary > name > timestamp)"""
+    # Add document that matches both queries
+    doc = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/python.pdf",
+        summary="A guide to Python programming",
+        mime_type="application/pdf",
+        tags=["python"],
+    )
+    await store.store(doc)
+
+    # Search with two fields that both match the same document
+    results = await store.multi_field_search(
+        field_queries={"name": "Python", "summary": "Python"},
+        combine_mode="union",
+    )
+
+    # Should return one result (deduplicated)
+    assert len(results) == 1
+    # Score should be positive (uses summary score since both fields present)
+    assert results[0].score > 0
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_empty_queries_raises_error(store):
+    """Test that empty field_queries raises ValueError"""
+    with pytest.raises(ValueError, match="field_queries cannot be empty"):
+        await store.multi_field_search(
+            field_queries={},
+            combine_mode="intersection",
+        )
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_invalid_combine_mode_raises_error(store):
+    """Test that invalid combine_mode raises ValueError"""
+    with pytest.raises(ValueError, match="Invalid combine_mode"):
+        await store.multi_field_search(
+            field_queries={"name": "test"},
+            combine_mode="invalid_mode",
+        )
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_invalid_field_raises_error(store):
+    """Test that invalid field name raises ValueError"""
+    with pytest.raises(ValueError, match="Invalid field"):
+        await store.multi_field_search(
+            field_queries={"invalid_field": "test"},
+            combine_mode="intersection",
+        )
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_no_intersection(store):
+    """Test multi-field search with no matching documents in intersection mode"""
+    # Add documents that don't match all criteria
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/python.pdf",
+        summary="A guide to Python",
+        mime_type="application/pdf",
+        tags=["python"],
+    )
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Machine Learning",
+        url="https://example.com/ml.pdf",
+        summary="ML guide",
+        mime_type="application/pdf",
+        tags=["ml"],
+    )
+
+    await store.store(doc1)
+    await store.store(doc2)
+
+    # Search for documents with "Python" in name AND "ml" in tags
+    # No document matches both criteria
+    results = await store.multi_field_search(
+        field_queries={"name": "Python", "tags": "ml"},
+        combine_mode="intersection",
+    )
+
+    assert len(results) == 0
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_respects_limit(store):
+    """Test that multi-field search respects the limit parameter"""
+    # Add multiple documents
+    for i in range(5):
+        doc = DocumentMetadata(
+            uuid="",
+            name=f"Document {i}",
+            url=f"https://example.com/doc{i}.pdf",
+            summary="Test document about Python programming",
+            mime_type="application/pdf",
+            tags=["python"],
+        )
+        await store.store(doc)
+
+    # Search with union mode (all should match) but limit to 3
+    results = await store.multi_field_search(
+        field_queries={"summary": "Python", "tags": "python"},
+        combine_mode="union",
+        limit=3,
+    )
+
+    assert len(results) == 3
+
+
+@pytest.mark.asyncio
+async def test_multi_field_search_hierarchical_scoring(store):
+    """Test hierarchical scoring: summary > name > timestamp"""
+    import asyncio
+
+    # Add documents with delays to ensure different timestamps
+    doc1 = DocumentMetadata(
+        uuid="",
+        name="Python Programming",
+        url="https://example.com/doc1.pdf",
+        summary="Introduction to Python",
+        mime_type="application/pdf",
+        tags=["python", "programming"],
+    )
+    await store.store(doc1)
+    await asyncio.sleep(0.01)  # Small delay for timestamp difference
+
+    doc2 = DocumentMetadata(
+        uuid="",
+        name="Advanced Python",
+        url="https://example.com/doc2.pdf",
+        summary="Expert guide to Python",
+        mime_type="application/pdf",
+        tags=["python", "programming"],
+    )
+    await store.store(doc2)
+    await asyncio.sleep(0.01)
+
+    doc3 = DocumentMetadata(
+        uuid="",
+        name="Python Tutorial",
+        url="https://example.com/doc3.pdf",
+        summary="Beginner's guide",
+        mime_type="application/pdf",
+        tags=["python", "programming"],
+    )
+    await store.store(doc3)
+
+    # Test 1: Name + tags search should use name scores (tags are just filters)
+    # Intersection mode: only returns docs matching BOTH name="Advanced" AND tags="python"
+    results_name = await store.multi_field_search(
+        field_queries={"name": "Advanced", "tags": "python"},
+        combine_mode="intersection",
+    )
+
+    assert len(results_name) == 1  # Only doc2 has "Advanced" in name
+    assert results_name[0].result.name == "Advanced Python"
+
+    # Test 1b: Use "Python" in name search (matches all docs)
+    results_name_all = await store.multi_field_search(
+        field_queries={"name": "Python", "tags": "python"},
+        combine_mode="intersection",
+    )
+
+    assert len(results_name_all) == 3
+    # Scores should be based on name field (all have "Python" in name)
+
+    # Test 2: Tags only search should sort by timestamp (newest first)
+    results_tags = await store.multi_field_search(
+        field_queries={"tags": "python"},
+        combine_mode="intersection",
+    )
+
+    assert len(results_tags) == 3
+    # Doc3 was created last, so should have highest timestamp score
+    assert results_tags[0].result.name == "Python Tutorial"
+    assert results_tags[2].result.name == "Python Programming"  # Created first
+
+    # Test 3: Summary + tags should use summary score (not tested in detail due to
+    # semantic search variability, but verify it runs and uses summary field)
+    results_summary = await store.multi_field_search(
+        field_queries={"summary": "Python", "tags": "python"},
+        combine_mode="intersection",
+    )
+
+    assert len(results_summary) == 3
+    # All documents match, actual ranking depends on semantic search

@@ -143,26 +143,34 @@ async def cmd_get(args: argparse.Namespace):
 
 
 async def cmd_search(args: argparse.Namespace):
-    """Search documents"""
+    """Search documents with multi-field queries"""
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
 
-    # Determine which field to search (default to summary)
-    search_field = "summary"
+    # Collect field queries
+    field_queries = {}
     if args.name:
-        search_field = "name"
-    elif args.tags:
-        search_field = "tags"
-    elif args.extra:
-        search_field = "extra"
+        field_queries["name"] = args.name
+    if args.tags:
+        field_queries["tags"] = args.tags
+    if args.summary:
+        field_queries["summary"] = args.summary
+    if args.extra:
+        field_queries["extra"] = args.extra
+
+    if not field_queries:
+        print(
+            "Error: At least one field query is required (--name, --tags, --summary, or --extra)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     try:
         async with store:
-            hits = await store.search(
-                args.query,
+            hits = await store.multi_field_search(
+                field_queries=field_queries,
                 limit=args.limit,
-                search_mode="auto",
-                search_field=search_field,
+                combine_mode="union" if args.union else "intersection",
             )
 
             if args.json:
@@ -170,14 +178,16 @@ async def cmd_search(args: argparse.Namespace):
                 print(json.dumps(output, indent=2, default=str))
             else:
                 if not hits:
-                    print(f"No matches found for: {args.query}")
+                    query_desc = ", ".join(f"{k}={v}" for k, v in field_queries.items())
+                    print(f"No matches found for: {query_desc}")
                 else:
-                    # Show field being searched if not summary
-                    field_info = (
-                        f" (in {search_field})" if search_field != "summary" else ""
+                    # Show query information
+                    query_desc = ", ".join(
+                        f"{k}='{v}'" for k, v in field_queries.items()
                     )
+                    mode = "union" if args.union else "intersection"
                     print(
-                        f"Found {len(hits)} match(es) for '{args.query}'{field_info}:\n"
+                        f"Found {len(hits)} match(es) for {query_desc} (mode: {mode}):\n"
                     )
 
                     for hit in hits:
@@ -782,13 +792,17 @@ Examples:
     --tags="ai,research,transformers" \\
     --mime-type="application/pdf"
 
-  # Search documents (searches summaries by default)
-  asta-documents search "transformer"
+  # Search documents by single field
+  asta-documents search --summary="transformer architecture"
+  asta-documents search --name="Attention"
+  asta-documents search --tags="ai,nlp"
+  asta-documents search --extra=".year > 2020"
 
-  # Search by specific field
-  asta-documents search "Attention" --name
-  asta-documents search "ai,nlp" --tags
-  asta-documents search ".year > 2020" --extra
+  # Search multiple fields (default: intersection)
+  asta-documents search --summary="transformers" --tags="ai"
+
+  # Search multiple fields with union
+  asta-documents search --summary="transformers" --name="BERT" --union
 
   # Get specific document
   asta-documents get 6MNxGbWGRC
@@ -887,7 +901,6 @@ Examples:
     search_parser = subparsers.add_parser(
         "search", help="Search documents", parents=[parent_parser]
     )
-    search_parser.add_argument("query", help="Search query")
     search_parser.add_argument(
         "--limit",
         type=int,
@@ -895,27 +908,33 @@ Examples:
         help="Maximum results (default: 10)",
     )
 
-    # Field selection (mutually exclusive)
-    field_group = search_parser.add_mutually_exclusive_group()
-    field_group.add_argument(
+    # Field-specific queries (can be combined)
+    search_parser.add_argument(
         "--name",
-        action="store_true",
-        help="Search document names only",
+        type=str,
+        help="Query for document names",
     )
-    field_group.add_argument(
+    search_parser.add_argument(
         "--tags",
-        action="store_true",
-        help="Search tags only",
+        type=str,
+        help="Query for tags (comma-separated)",
     )
-    field_group.add_argument(
+    search_parser.add_argument(
         "--summary",
-        action="store_true",
-        help="Search summaries (default if no field specified)",
+        type=str,
+        help="Query for summaries",
     )
-    field_group.add_argument(
+    search_parser.add_argument(
         "--extra",
+        type=str,
+        help="Query for extra metadata (JSONPath syntax)",
+    )
+
+    # Combine mode
+    search_parser.add_argument(
+        "--union",
         action="store_true",
-        help="Search extra metadata with JSONPath syntax",
+        help="Return union of results (default: intersection)",
     )
 
     search_parser.add_argument(

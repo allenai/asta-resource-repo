@@ -181,28 +181,44 @@ Search Query
 
 The search system uses **field-specific strategies** based on which document field you're searching:
 
-**Field Flags** (mutually exclusive):
-- `--name`: Search document names with simple word matching
-- `--tags`: Search tags with comma-separated matching
-- `--summary`: Search summaries with semantic/hybrid search (default)
-- `--extra`: Search extra metadata with JSONPath-like syntax
+**Field Query Parameters** (can be combined):
+- `--name=QUERY`: Search document names with simple word matching
+- `--tags=QUERY`: Search tags with comma-separated matching
+- `--summary=QUERY`: Search summaries with semantic/hybrid search
+- `--extra=QUERY`: Search extra metadata with JSONPath-like syntax
+
+**Combine Modes:**
+- Default (intersection): Returns documents matching ALL field queries
+- `--union`: Returns documents matching ANY field query
+
+**Hierarchical Scoring:**
+
+Results are sorted using a priority hierarchy, where tags and extra act as filters:
+
+1. **Summary score** (if summary query present): Uses semantic/hybrid search relevance
+2. **Name score** (if name query present): Uses word-matching score
+3. **Created timestamp** (for tags/extra only queries): Sorts by creation time (newest first)
+
+This means:
+- `--summary` + `--tags`: Sorted by summary relevance (tags filter)
+- `--name` + `--tags`: Sorted by name word-match score (tags filter)
+- `--tags` only: Sorted by created_at timestamp
+- `--summary` + `--name` + `--tags`: Sorted by summary relevance (name and tags filter)
 
 **Examples:**
 ```bash
-# Name search (simple word matching)
-asta-documents search "Attention" --name
+# Single field search
+asta-documents search --name="Attention"
+asta-documents search --tags="ai,nlp"
+asta-documents search --summary="papers about transformers"
+asta-documents search --extra=".year > 2020"
 
-# Tag search (comma-separated, percentage scoring)
-asta-documents search "ai,nlp" --tags
+# Multiple fields (intersection - documents matching ALL)
+asta-documents search --summary="transformers" --tags="ai"
+asta-documents search --name="Attention" --tags="nlp" --extra=".year > 2015"
 
-# Summary search (semantic/hybrid, default)
-asta-documents search "papers about transformers"
-asta-documents search "transformers" --summary  # explicit
-
-# Extra metadata search (JSONPath queries)
-asta-documents search ".year > 2020" --extra
-asta-documents search ".author contains Vaswani" --extra
-asta-documents search ".venue == NeurIPS" --extra
+# Multiple fields (union - documents matching ANY)
+asta-documents search --summary="transformers" --name="BERT" --union
 ```
 
 **Field-Specific Implementations:**
@@ -593,22 +609,25 @@ uv run asta-documents list --tags="ai,research"
 # List with verbose output
 uv run asta-documents list -v
 
-# Search documents (searches summaries by default using best available method)
-uv run asta-documents search "transformer"
+# Search documents by single field
+uv run asta-documents search --summary="transformer"
+uv run asta-documents search --name="Attention"
+uv run asta-documents search --tags="ai,nlp"
 
-# Search by document name
-uv run asta-documents search "Attention" --name
-
-# Search by tags
-uv run asta-documents search "ai,nlp" --tags
-
-# Search summaries with scores
-uv run asta-documents search "deep learning" --summary --show-scores
+# Search with scores
+uv run asta-documents search --summary="deep learning" --show-scores
 
 # Search extra metadata with JSONPath-like syntax
-uv run asta-documents search ".year > 2020" --extra
-uv run asta-documents search ".author contains Vaswani" --extra
-uv run asta-documents search ".venue == NeurIPS" --extra
+uv run asta-documents search --extra=".year > 2020"
+uv run asta-documents search --extra=".author contains Vaswani"
+uv run asta-documents search --extra=".venue == NeurIPS"
+
+# Search multiple fields (default: intersection - documents matching ALL queries)
+uv run asta-documents search --summary="transformers" --tags="ai"
+uv run asta-documents search --name="Attention" --tags="nlp" --extra=".year > 2015"
+
+# Search multiple fields with union (documents matching ANY query)
+uv run asta-documents search --summary="transformers" --name="BERT" --union
 
 # Get specific document by UUID
 uv run asta-documents get 6MNxGbWGRC
@@ -992,16 +1011,20 @@ uv run asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
 # List documents
 uv run asta-documents list
 
-# Search (searches summaries by default using best available method)
-uv run asta-documents search "attention"
+# Search by single field
+uv run asta-documents search --summary="attention"
+uv run asta-documents search --name="Attention"
+uv run asta-documents search --tags="ai,transformers"
+uv run asta-documents search --extra=".year > 2015"
 
 # Search with scores
-uv run asta-documents search "transformer" --show-scores
+uv run asta-documents search --summary="transformer" --show-scores
 
-# Search by specific field
-uv run asta-documents search "Attention" --name
-uv run asta-documents search "ai,transformers" --tags
-uv run asta-documents search ".year > 2015" --extra
+# Search multiple fields (intersection)
+uv run asta-documents search --summary="transformers" --tags="ai"
+
+# Search multiple fields (union)
+uv run asta-documents search --summary="transformers" --name="BERT" --union
 
 # Update document metadata (use UUID from add command output)
 uv run asta-documents update 6MNxGbWGRC \
