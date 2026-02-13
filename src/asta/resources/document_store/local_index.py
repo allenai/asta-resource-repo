@@ -10,13 +10,18 @@ import logging
 from ..model import (
     DocumentMetadata,
     SearchHit,
-    parse_document_uri,
 )
 from ..exceptions import ValidationError, DocumentServiceError
 from ..utils.short_id import generate_unique_short_id
 from .base import DocumentStore
 from .search_cache import SearchCache
 from .bm25_ranker import BM25Ranker
+
+# Import Config types for from_config method
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import Config
 
 # Optional embedding imports
 try:
@@ -42,6 +47,11 @@ class LocalIndexDocumentStore(DocumentStore):
         index_path: str = ".asta/documents/index.yaml",
         enable_cache: bool = True,
         enable_embeddings: bool = True,
+        bm25_k1: float = 1.2,
+        bm25_b: float = 0.75,
+        field_weights: Optional[dict[str, float]] = None,
+        hybrid_bm25_weight: float = 0.5,
+        hybrid_semantic_weight: float = 0.5,
     ):
         """Initialize the local index document store
 
@@ -49,30 +59,60 @@ class LocalIndexDocumentStore(DocumentStore):
             index_path: Path to the YAML index file (default: ".asta/documents/index.yaml")
             enable_cache: Enable SQLite search cache for fast FTS5 search (default: True)
             enable_embeddings: Enable semantic search with embeddings (default: True, requires sentence-transformers)
-
-        Note: Namespace is automatically derived from index location
+            bm25_k1: BM25 term saturation parameter (default: 1.2)
+            bm25_b: BM25 length normalization parameter (default: 0.75)
+            field_weights: Field weights for ranking (default: {"summary": 3.0, "name": 2.0, "tags": 1.5, "extra": 1.0})
+            hybrid_bm25_weight: Weight for BM25 in hybrid search (default: 0.5)
+            hybrid_semantic_weight: Weight for semantic search in hybrid search (default: 0.5)
         """
         self.index_path = Path(index_path)
-        self.namespace: Optional[str] = None  # Set during initialize()
-        self._documents: dict[str, DocumentMetadata] = {}
+        self._documents: dict[str, DocumentMetadata] = {}  # Keyed by UUID
         self._initialized = False
         self._enable_cache = enable_cache
         self._enable_embeddings = enable_embeddings and EMBEDDINGS_AVAILABLE
         self._search_cache: Optional[SearchCache] = None
         self._embedding_manager: Optional[EmbeddingManager] = None
 
+        # Search configuration
+        self._bm25_k1 = bm25_k1
+        self._bm25_b = bm25_b
+        self._field_weights = field_weights or {
+            "summary": 3.0,
+            "name": 2.0,
+            "tags": 1.5,
+            "extra": 1.0,
+        }
+        self._hybrid_bm25_weight = hybrid_bm25_weight
+        self._hybrid_semantic_weight = hybrid_semantic_weight
+
+    @classmethod
+    def from_config(cls, config: "Config") -> "LocalIndexDocumentStore":
+        """Create LocalIndexDocumentStore from Config object
+
+        Args:
+            config: Config object containing index and search settings
+
+        Returns:
+            Initialized LocalIndexDocumentStore instance
+        """
+        return cls(
+            index_path=config.index_path,
+            enable_cache=config.search.enable_cache,
+            enable_embeddings=config.search.enable_embeddings,
+            bm25_k1=config.search.bm25_k1,
+            bm25_b=config.search.bm25_b,
+            field_weights=config.search.field_weights,
+            hybrid_bm25_weight=config.search.hybrid_bm25_weight,
+            hybrid_semantic_weight=config.search.hybrid_semantic_weight,
+        )
+
     async def initialize(self):
-        """Initialize the document store by deriving namespace and loading index"""
+        """Initialize the document store by loading index"""
         if self._initialized:
             return
 
         # Create .asta/documents directory if it doesn't exist
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Derive namespace from index file location
-        from ..utils.git_namespace import derive_namespace
-
-        self.namespace = derive_namespace(self.index_path)
 
         # Create empty index file if it doesn't exist
         if not self.index_path.exists():
@@ -130,11 +170,7 @@ class LocalIndexDocumentStore(DocumentStore):
         await self.close()
 
     def _load_index(self):
-        """Load the YAML index file into memory
-
-        Note: YAML stores only `uuid` field (not full URI). We inject
-              `_namespace` at runtime to enable URI reconstruction.
-        """
+        """Load the YAML index file into memory"""
         try:
             with open(self.index_path, "r") as f:
                 # Use file locking to prevent concurrent reads during writes
@@ -168,11 +204,8 @@ class LocalIndexDocumentStore(DocumentStore):
                 # Create document metadata
                 doc = DocumentMetadata(**doc_data)
 
-                # Inject namespace for URI reconstruction
-                doc._namespace = self.namespace
-
-                # Store by full URI (reconstructed from namespace + uuid)
-                self._documents[doc.uri] = doc
+                # Store by UUID
+                self._documents[doc.uuid] = doc
 
         except Exception as e:
             raise DocumentServiceError(f"Failed to load index file: {e}")
@@ -182,15 +215,11 @@ class LocalIndexDocumentStore(DocumentStore):
 
         Args:
             data: Optional dict to save directly (for initialization)
-
-        Note: Only `uuid` field is saved (not full URI). The `_namespace` field
-              is excluded automatically by Pydantic (private field convention).
         """
         try:
             if data is None:
                 # Convert documents to dict format for YAML
                 # model_dump() already serializes datetimes to ISO strings via field_serializer
-                # and excludes private fields (_namespace) and computed properties (uri)
                 docs_list = [
                     doc.model_dump(exclude_none=False)
                     for doc in self._documents.values()
@@ -251,26 +280,23 @@ class LocalIndexDocumentStore(DocumentStore):
             existing_uuids = {doc.uuid for doc in self._documents.values()}
             document.uuid = generate_unique_short_id(existing_uuids)
 
-        # Inject namespace for URI reconstruction
-        document._namespace = self.namespace
-
         # Set timestamps
         now = datetime.now(timezone.utc)
         if not document.created_at:
             document.created_at = now
         document.modified_at = now
 
-        # Store in memory by full URI (reconstructed from namespace + uuid)
-        self._documents[document.uri] = document
+        # Store in memory by UUID
+        self._documents[document.uuid] = document
         self._save_index()
 
-        return document.uri
+        return document.uuid
 
-    async def get(self, uri: str) -> Optional[DocumentMetadata]:
-        """Retrieve document metadata by URI
+    async def get(self, uuid: str) -> Optional[DocumentMetadata]:
+        """Retrieve document metadata by UUID
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
 
         Returns:
             Document metadata if found, None otherwise
@@ -278,14 +304,7 @@ class LocalIndexDocumentStore(DocumentStore):
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        namespace, _ = parse_document_uri(uri)
-        if namespace != self.namespace:
-            raise ValidationError(
-                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-
-        return self._documents.get(uri)
+        return self._documents.get(uuid)
 
     async def list_docs(self) -> list[DocumentMetadata]:
         """List all documents in the index
@@ -399,14 +418,9 @@ class LocalIndexDocumentStore(DocumentStore):
         # Create BM25 ranker
         ranker = BM25Ranker(
             self._search_cache.conn,
-            k1=1.2,  # TODO: Get from config
-            b=0.75,  # TODO: Get from config
-            field_weights={
-                "name": 2.0,
-                "summary": 3.0,
-                "tags": 1.5,
-                "extra": 1.0,
-            },
+            k1=self._bm25_k1,
+            b=self._bm25_b,
+            field_weights=self._field_weights,
         )
 
         try:
@@ -446,16 +460,33 @@ class LocalIndexDocumentStore(DocumentStore):
         # Build FTS5 query with field boosting
         # FTS5 uses bm25() function for ranking (negative values, lower is better)
         # We multiply by -1 to get positive scores where higher is better
+        # Field order in FTS5 table: name, summary, tags, extra
+        name_weight = self._field_weights.get("name", 2.0)
+        summary_weight = self._field_weights.get("summary", 3.0)
+        tags_weight = self._field_weights.get("tags", 1.5)
+        extra_weight = self._field_weights.get("extra", 1.0)
+
         try:
             cursor.execute(
                 """
-                SELECT uri, bm25(documents_fts, 2.0, 3.0, 1.5, 1.0) * -1 as score
+                SELECT uri, bm25(documents_fts, ?, ?, ?, ?) * -1 as score
                 FROM documents_fts
                 WHERE documents_fts MATCH ?
-                ORDER BY bm25(documents_fts, 2.0, 3.0, 1.5, 1.0)
+                ORDER BY bm25(documents_fts, ?, ?, ?, ?)
                 LIMIT ?
                 """,
-                (query, limit),
+                (
+                    name_weight,
+                    summary_weight,
+                    tags_weight,
+                    extra_weight,
+                    query,
+                    name_weight,
+                    summary_weight,
+                    tags_weight,
+                    extra_weight,
+                    limit,
+                ),
             )
 
             results = []
@@ -764,8 +795,9 @@ class LocalIndexDocumentStore(DocumentStore):
         # Get BM25 results
         bm25_ranker = BM25Ranker(
             self._search_cache.conn,
-            k1=1.2,  # TODO: Get from config
-            b=0.75,  # TODO: Get from config
+            k1=self._bm25_k1,
+            b=self._bm25_b,
+            field_weights=self._field_weights,
         )
         bm25_results = bm25_ranker.rank(query, limit * 2)  # Get more for fusion
 
@@ -780,8 +812,8 @@ class LocalIndexDocumentStore(DocumentStore):
         final_results = hybrid_ranker.reciprocal_rank_fusion(
             bm25_results,
             semantic_results,
-            bm25_weight=0.5,  # TODO: Get from config
-            semantic_weight=0.5,  # TODO: Get from config
+            bm25_weight=self._hybrid_bm25_weight,
+            semantic_weight=self._hybrid_semantic_weight,
         )[:limit]
 
         # Convert to SearchHit objects
@@ -792,11 +824,11 @@ class LocalIndexDocumentStore(DocumentStore):
 
         return search_hits
 
-    async def delete(self, uri: str) -> bool:
-        """Delete a document by URI
+    async def delete(self, uuid: str) -> bool:
+        """Delete a document by UUID
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
 
         Returns:
             True if deleted, False if not found
@@ -804,25 +836,18 @@ class LocalIndexDocumentStore(DocumentStore):
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        namespace, _ = parse_document_uri(uri)
-        if namespace != self.namespace:
-            raise ValidationError(
-                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-
-        if uri in self._documents:
-            del self._documents[uri]
+        if uuid in self._documents:
+            del self._documents[uuid]
             self._save_index()
             return True
 
         return False
 
-    async def exists(self, uri: str) -> bool:
+    async def exists(self, uuid: str) -> bool:
         """Check if a document exists
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
 
         Returns:
             True if exists, False otherwise
@@ -830,19 +855,11 @@ class LocalIndexDocumentStore(DocumentStore):
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        try:
-            namespace, _ = parse_document_uri(uri)
-            if namespace != self.namespace:
-                return False
-        except ValidationError:
-            return False
-
-        return uri in self._documents
+        return uuid in self._documents
 
     async def update(
         self,
-        uri: str,
+        uuid: str,
         name: Optional[str] = None,
         url: Optional[str] = None,
         summary: Optional[str] = None,
@@ -853,7 +870,7 @@ class LocalIndexDocumentStore(DocumentStore):
         """Update document metadata
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
             name: New document name (optional)
             url: New document URL (optional)
             summary: New summary (optional)
@@ -865,24 +882,17 @@ class LocalIndexDocumentStore(DocumentStore):
             Updated document metadata
 
         Raises:
-            ValidationError: If URI not found or update values are invalid
+            ValidationError: If document not found or update values are invalid
         """
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        namespace, _ = parse_document_uri(uri)
-        if namespace != self.namespace:
-            raise ValidationError(
-                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-
         # Check if document exists
-        if uri not in self._documents:
-            raise ValidationError(f"Document not found: {uri}")
+        if uuid not in self._documents:
+            raise ValidationError(f"Document not found: {uuid}")
 
         # Get existing document
-        doc = self._documents[uri]
+        doc = self._documents[uuid]
 
         # Update fields if provided
         if name is not None:
@@ -921,35 +931,28 @@ class LocalIndexDocumentStore(DocumentStore):
 
         return doc
 
-    async def add_tags(self, uri: str, tags: list[str]) -> DocumentMetadata:
+    async def add_tags(self, uuid: str, tags: list[str]) -> DocumentMetadata:
         """Add tags to a document without replacing existing ones
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
             tags: List of tags to add
 
         Returns:
             Updated document metadata
 
         Raises:
-            ValidationError: If URI not found or tags are invalid
+            ValidationError: If document not found or tags are invalid
         """
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        namespace, _ = parse_document_uri(uri)
-        if namespace != self.namespace:
-            raise ValidationError(
-                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-
         # Check if document exists
-        if uri not in self._documents:
-            raise ValidationError(f"Document not found: {uri}")
+        if uuid not in self._documents:
+            raise ValidationError(f"Document not found: {uuid}")
 
         # Get existing document
-        doc = self._documents[uri]
+        doc = self._documents[uuid]
 
         # Add new tags without duplicates
         existing_tags = set(doc.tags or [])
@@ -964,35 +967,28 @@ class LocalIndexDocumentStore(DocumentStore):
 
         return doc
 
-    async def remove_tags(self, uri: str, tags: list[str]) -> DocumentMetadata:
+    async def remove_tags(self, uuid: str, tags: list[str]) -> DocumentMetadata:
         """Remove specific tags from a document
 
         Args:
-            uri: Document URI
+            uuid: Document UUID (10-character alphanumeric)
             tags: List of tags to remove
 
         Returns:
             Updated document metadata
 
         Raises:
-            ValidationError: If URI not found
+            ValidationError: If document not found
         """
         if not self._initialized:
             await self.initialize()
 
-        # Validate URI format
-        namespace, _ = parse_document_uri(uri)
-        if namespace != self.namespace:
-            raise ValidationError(
-                f"Namespace mismatch: expected {self.namespace}, got {namespace}"
-            )
-
         # Check if document exists
-        if uri not in self._documents:
-            raise ValidationError(f"Document not found: {uri}")
+        if uuid not in self._documents:
+            raise ValidationError(f"Document not found: {uuid}")
 
         # Get existing document
-        doc = self._documents[uri]
+        doc = self._documents[uuid]
 
         # Remove specified tags
         existing_tags = set(doc.tags or [])

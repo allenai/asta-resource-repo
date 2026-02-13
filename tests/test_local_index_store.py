@@ -61,9 +61,9 @@ async def test_store_document(store):
         extra={"author": "Test Author"},
     )
 
-    uri = await store.store(doc)
+    uuid = await store.store(doc)
 
-    assert uri.startswith("asta://")
+    assert len(uuid) == 10
     assert doc.created_at is not None
     assert doc.modified_at is not None
 
@@ -94,7 +94,7 @@ async def test_store_accepts_various_url_protocols(store):
 
     for i, url in enumerate(protocols):
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name=f"Test Document {i}",
             url=url,
             summary=f"Test document with {url.split('://')[0]} protocol",
@@ -103,7 +103,7 @@ async def test_store_accepts_various_url_protocols(store):
 
         # Should not raise ValidationError
         uri = await store.store(doc)
-        assert uri.startswith("asta://")
+        assert len(uri) == 10
 
         # Verify it was stored correctly
         retrieved = await store.get(uri)
@@ -141,7 +141,7 @@ async def test_get_document(store):
     retrieved = await store.get(uri)
 
     assert retrieved is not None
-    assert retrieved.uri == uri
+    assert retrieved.uuid == uri
     assert retrieved.name == "Test Document"
     assert retrieved.url == "https://example.com/doc.pdf"
     assert retrieved.summary == "A test document"
@@ -151,23 +151,8 @@ async def test_get_document(store):
 @pytest.mark.asyncio
 async def test_get_nonexistent_document(store):
     """Test getting a document that doesn't exist"""
-    from asta.resources.model import construct_document_uri
-
-    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
-    result = await store.get(uri)
+    result = await store.get(TEST_SHORT_ID)
     assert result is None
-
-
-@pytest.mark.asyncio
-async def test_get_validates_namespace(store):
-    """Test that get validates namespace matches"""
-    from asta.resources.model import construct_document_uri
-
-    # Use a different namespace than the store's
-    wrong_namespace = "wrong-namespace-different-from-store"
-    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
-    with pytest.raises(ValidationError, match="Namespace mismatch"):
-        await store.get(uri)
 
 
 @pytest.mark.asyncio
@@ -343,10 +328,7 @@ async def test_delete_document(store):
 @pytest.mark.asyncio
 async def test_delete_nonexistent_document(store):
     """Test deleting a document that doesn't exist"""
-    from asta.resources.model import construct_document_uri
-
-    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
-    deleted = await store.delete(uri)
+    deleted = await store.delete(TEST_SHORT_ID)
     assert deleted is False
 
 
@@ -363,21 +345,7 @@ async def test_exists(store):
 
     uri = await store.store(doc)
     assert await store.exists(uri)
-
-    from asta.resources.model import construct_document_uri
-
-    fake_uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
-    assert not await store.exists(fake_uri)
-
-
-@pytest.mark.asyncio
-async def test_exists_wrong_namespace(store):
-    """Test exists with wrong namespace returns False"""
-    from asta.resources.model import construct_document_uri
-
-    wrong_namespace = "wrong-namespace-different-from-store"
-    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
-    assert not await store.exists(uri)
+    assert not await store.exists(TEST_SHORT_ID)
 
 
 @pytest.mark.asyncio
@@ -871,24 +839,8 @@ async def test_update_multiple_fields(store):
 @pytest.mark.asyncio
 async def test_update_nonexistent_document(store):
     """Test updating a document that doesn't exist"""
-    from asta.resources.model import construct_document_uri
-
-    uri = construct_document_uri(store.namespace, TEST_SHORT_ID)
-
     with pytest.raises(ValidationError, match="Document not found"):
-        await store.update(uri, name="New Name")
-
-
-@pytest.mark.asyncio
-async def test_update_validates_namespace(store):
-    """Test that update validates namespace matches"""
-    from asta.resources.model import construct_document_uri
-
-    wrong_namespace = "wrong-namespace"
-    uri = construct_document_uri(wrong_namespace, TEST_SHORT_ID)
-
-    with pytest.raises(ValidationError, match="Namespace mismatch"):
-        await store.update(uri, name="New Name")
+        await store.update(TEST_SHORT_ID, name="New Name")
 
 
 @pytest.mark.asyncio
@@ -1106,10 +1058,8 @@ async def test_add_tags_sorts_tags(store):
 @pytest.mark.asyncio
 async def test_add_tags_nonexistent_document(store):
     """Test adding tags to a non-existent document raises error"""
-    # Use a properly formatted URI with UUID
-    fake_uri = f"asta://{store.namespace}/{TEST_SHORT_ID}"
     with pytest.raises(ValidationError, match="Document not found"):
-        await store.add_tags(fake_uri, ["tag"])
+        await store.add_tags(TEST_SHORT_ID, ["tag"])
 
 
 @pytest.mark.asyncio
@@ -1178,11 +1128,9 @@ async def test_remove_all_tags(store):
 
 @pytest.mark.asyncio
 async def test_remove_tags_nonexistent_document(store):
-    """Test removing tags from a non-existent document raises error"""
-    # Use a properly formatted URI with UUID
-    fake_uri = f"asta://{store.namespace}/{TEST_SHORT_ID}"
+    """Test removing tags from a nonexistent document"""
     with pytest.raises(ValidationError, match="Document not found"):
-        await store.remove_tags(fake_uri, ["tag"])
+        await store.remove_tags(TEST_SHORT_ID, ["tag"])
 
 
 @pytest.mark.asyncio
@@ -1378,12 +1326,7 @@ async def test_short_id_generation(store):
         mime_type="application/pdf",
     )
 
-    uri = await store.store(doc)
-
-    # Parse URI to extract UUID
-    from asta.resources.model import parse_document_uri
-
-    namespace, uuid = parse_document_uri(uri)
+    uuid = await store.store(doc)
 
     # Verify UUID is 10 characters and alphanumeric
     assert len(uuid) == 10
@@ -1407,11 +1350,7 @@ async def test_short_id_collision_detection(store):
             summary=f"Document {i} summary",
             mime_type="application/pdf",
         )
-        uri = await store.store(doc)
-
-        from asta.resources.model import parse_document_uri
-
-        _, uuid = parse_document_uri(uri)
+        uuid = await store.store(doc)
 
         # Verify no collisions
         assert uuid not in uuids, f"UUID collision detected: {uuid}"
@@ -1419,53 +1358,6 @@ async def test_short_id_collision_detection(store):
 
     # Verify all 100 UUIDs are unique
     assert len(uuids) == 100
-
-
-@pytest.mark.asyncio
-async def test_namespace_injection(store):
-    """Test that namespace is injected into loaded documents"""
-    doc = DocumentMetadata(
-        uuid="",
-        name="Test Document",
-        url="https://example.com/doc.pdf",
-        summary="A test document",
-        mime_type="application/pdf",
-    )
-
-    uri = await store.store(doc)
-    retrieved = await store.get(uri)
-
-    # Verify namespace is injected
-    assert retrieved._namespace == store.namespace
-    assert retrieved._namespace != ""
-
-
-@pytest.mark.asyncio
-async def test_uri_property_reconstruction(store):
-    """Test that URI property correctly reconstructs full URI"""
-    doc = DocumentMetadata(
-        uuid="",
-        name="Test Document",
-        url="https://example.com/doc.pdf",
-        summary="A test document",
-        mime_type="application/pdf",
-    )
-
-    uri = await store.store(doc)
-    retrieved = await store.get(uri)
-
-    # Verify URI is reconstructed correctly
-    assert retrieved.uri == uri
-    assert retrieved.uri.startswith("asta://")
-    assert retrieved._namespace in retrieved.uri
-    assert retrieved.uuid in retrieved.uri
-
-    # Verify format
-    from asta.resources.model import parse_document_uri
-
-    namespace, uuid = parse_document_uri(retrieved.uri)
-    assert namespace == store.namespace
-    assert uuid == retrieved.uuid
 
 
 @pytest.mark.asyncio
@@ -1518,60 +1410,14 @@ async def test_short_id_persistence_across_reloads(temp_index_path):
             summary="A test document",
             mime_type="application/pdf",
         )
-        uri = await store1.store(doc)
-
-        # Extract UUID
-        from asta.resources.model import parse_document_uri
-
-        _, uuid1 = parse_document_uri(uri)
+        uuid = await store1.store(doc)
 
     # Reload and verify
     store2 = LocalIndexDocumentStore(index_path=str(temp_index_path))
     async with store2:
-        retrieved = await store2.get(uri)
+        retrieved = await store2.get(uuid)
         assert retrieved is not None
-        assert retrieved.uuid == uuid1
-        assert retrieved.uri == uri
-
-
-@pytest.mark.asyncio
-async def test_uri_parsing_with_short_ids(store):
-    """Test that URI parsing works with short IDs"""
-    from asta.resources.model import parse_document_uri, construct_document_uri
-
-    # Test valid short ID
-    short_id = "abc123XYZ0"
-    uri = construct_document_uri(store.namespace, short_id)
-
-    assert uri == f"asta://{store.namespace}/{short_id}"
-
-    # Parse it back
-    namespace, uuid = parse_document_uri(uri)
-    assert namespace == store.namespace
-    assert uuid == short_id
-
-
-@pytest.mark.asyncio
-async def test_invalid_short_id_format(store):
-    """Test that invalid short ID formats are rejected"""
-    from asta.resources.model import construct_document_uri
-    from asta.resources.exceptions import ValidationError
-
-    # Test too short
-    with pytest.raises(ValidationError, match="10-character"):
-        construct_document_uri(store.namespace, "abc123")
-
-    # Test too long
-    with pytest.raises(ValidationError, match="10-character"):
-        construct_document_uri(store.namespace, "abc123xyz012")
-
-    # Test invalid characters
-    with pytest.raises(ValidationError, match="10-character"):
-        construct_document_uri(store.namespace, "abc!@#$%^&")
-
-    # Test spaces
-    with pytest.raises(ValidationError, match="10-character"):
-        construct_document_uri(store.namespace, "abc 123xyz")
+        assert retrieved.uuid == uuid
 
 
 # ============================================================================

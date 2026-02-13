@@ -14,15 +14,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from ..config import load_config
-from ..model import DocumentMetadata, construct_document_uri
+from ..model import DocumentMetadata
 from ..exceptions import ValidationError, DocumentServiceError
+from ..document_store.local_index import LocalIndexDocumentStore
 
 
 def format_document(doc: DocumentMetadata, verbose: bool = False) -> str:
     """Format a document for display"""
     if verbose:
         return f"""UUID: {doc.uuid}
-URI: {doc.uri}
 Name: {doc.name}
 URL: {doc.url}
 Summary: {doc.summary}
@@ -39,8 +39,8 @@ Extra: {json.dumps(doc.extra, indent=2) if doc.extra else '(none)'}
 
 async def cmd_list(args: argparse.Namespace):
     """List all documents"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     async with store:
         documents = await store.list_docs()
@@ -72,8 +72,8 @@ async def cmd_list(args: argparse.Namespace):
 
 async def cmd_add(args: argparse.Namespace):
     """Add a new document"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     # Parse tags
     tags = []
@@ -91,7 +91,7 @@ async def cmd_add(args: argparse.Namespace):
 
     # Create document metadata
     doc = DocumentMetadata(
-        uri="",  # Will be generated
+        uuid="",  # Will be generated
         name=args.name,
         url=args.url,
         summary=args.summary,
@@ -102,13 +102,13 @@ async def cmd_add(args: argparse.Namespace):
 
     try:
         async with store:
-            uri = await store.store(doc)
+            uuid = await store.store(doc)
 
             if args.json:
-                doc.uri = uri
+                doc.uuid = uuid
                 print(json.dumps(doc.model_dump(mode="json"), indent=2, default=str))
             else:
-                print(f"✓ Document added: {uri}")
+                print(f"✓ Document added: {uuid}")
                 print(f"  Name: {args.name}")
                 print(f"  URL: {args.url}")
                 if tags:
@@ -121,14 +121,12 @@ async def cmd_add(args: argparse.Namespace):
 
 async def cmd_get(args: argparse.Namespace):
     """Get a document by UUID"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     try:
         async with store:
-            # Construct URI from namespace + UUID
-            uri = construct_document_uri(store.namespace, args.uuid)
-            doc = await store.get(uri)
+            doc = await store.get(args.uuid)
 
             if doc is None:
                 print(f"Document not found: {args.uuid}", file=sys.stderr)
@@ -146,8 +144,8 @@ async def cmd_get(args: argparse.Namespace):
 
 async def cmd_search(args: argparse.Namespace):
     """Search documents"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     # Determine which field to search (default to summary)
     search_field = "summary"
@@ -199,8 +197,8 @@ async def cmd_search(args: argparse.Namespace):
 
 async def cmd_update(args: argparse.Namespace):
     """Update a document's metadata"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     # Parse tags if provided
     tags = None
@@ -218,12 +216,9 @@ async def cmd_update(args: argparse.Namespace):
 
     try:
         async with store:
-            # Construct URI from namespace + UUID
-            uri = construct_document_uri(store.namespace, args.uuid)
-
             # Update document
             updated_doc = await store.update(
-                uri=uri,
+                uuid=args.uuid,
                 name=args.name,
                 url=args.url,
                 summary=args.summary,
@@ -253,20 +248,16 @@ async def cmd_update(args: argparse.Namespace):
 
 async def cmd_remove(args: argparse.Namespace):
     """Remove a document by UUID"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     try:
         async with store:
-            # Construct URI from namespace + UUID
-            uri = construct_document_uri(store.namespace, args.uuid)
-            deleted = await store.delete(uri)
+            deleted = await store.delete(args.uuid)
 
             if deleted:
                 if args.json:
-                    print(
-                        json.dumps({"status": "deleted", "uuid": args.uuid, "uri": uri})
-                    )
+                    print(json.dumps({"status": "deleted", "uuid": args.uuid}))
                 else:
                     print(f"✓ Document removed: {args.uuid}")
             else:
@@ -283,8 +274,8 @@ async def cmd_remove(args: argparse.Namespace):
 
 async def cmd_add_tags(args: argparse.Namespace):
     """Add tags to a document"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     # Parse tags
     if not args.tags:
@@ -295,9 +286,7 @@ async def cmd_add_tags(args: argparse.Namespace):
 
     try:
         async with store:
-            # Construct URI from namespace + UUID
-            uri = construct_document_uri(store.namespace, args.uuid)
-            updated_doc = await store.add_tags(uri, tags)
+            updated_doc = await store.add_tags(args.uuid, tags)
 
             if args.json:
                 print(
@@ -318,8 +307,8 @@ async def cmd_add_tags(args: argparse.Namespace):
 
 async def cmd_remove_tags(args: argparse.Namespace):
     """Remove tags from a document"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     # Parse tags
     if not args.tags:
@@ -330,9 +319,7 @@ async def cmd_remove_tags(args: argparse.Namespace):
 
     try:
         async with store:
-            # Construct URI from namespace + UUID
-            uri = construct_document_uri(store.namespace, args.uuid)
-            updated_doc = await store.remove_tags(uri, tags)
+            updated_doc = await store.remove_tags(args.uuid, tags)
 
             if args.json:
                 print(
@@ -355,8 +342,8 @@ async def cmd_remove_tags(args: argparse.Namespace):
 
 async def cmd_show(args: argparse.Namespace):
     """Show index information"""
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     async with store:
         documents = await store.list_docs()
@@ -437,7 +424,7 @@ async def cmd_cache_list(args: argparse.Namespace):
                 "fetch_date": fetch_date,
                 "age_days": age_days,
                 "size_bytes": content_size,
-                "document_uri": metadata.get("document_uri", "N/A"),
+                "document_uuid": metadata.get("document_uuid", "N/A"),
             }
         )
 
@@ -645,7 +632,7 @@ async def cmd_cache_info(args: argparse.Namespace):
         output = {
             "hash": args.hash,
             "url": metadata.get("url", "Unknown"),
-            "document_uri": metadata.get("document_uri", "N/A"),
+            "document_uuid": metadata.get("document_uuid", "N/A"),
             "content_type": metadata.get("content_type", "Unknown"),
             "fetch_date": metadata.get("fetch_date", "Unknown"),
             "age_days": age_days,
@@ -662,7 +649,7 @@ async def cmd_cache_info(args: argparse.Namespace):
     print("=" * 70)
     print(f"Hash: {args.hash}")
     print(f"URL: {metadata.get('url', 'Unknown')}")
-    print(f"Document URI: {metadata.get('document_uri', 'N/A')}")
+    print(f"Document UUID: {metadata.get('document_uuid', 'N/A')}")
     print(f"Content Type: {metadata.get('content_type', 'Unknown')}")
     print(f"Fetch Date: {metadata.get('fetch_date', 'Unknown')}")
 
@@ -685,13 +672,11 @@ async def cmd_cache_info(args: argparse.Namespace):
 async def cmd_fetch(args: argparse.Namespace):
     """Fetch content from URL with caching."""
     # Get document metadata
-    config = load_config()
-    store = config.document_store()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    store = LocalIndexDocumentStore.from_config(config)
 
     async with store:
-        # Construct URI from namespace + UUID
-        uri = construct_document_uri(store.namespace, args.uuid)
-        doc = await store.get(uri)
+        doc = await store.get(args.uuid)
 
         if doc is None:
             print(f"Error: Document not found: {args.uuid}", file=sys.stderr)
@@ -746,7 +731,7 @@ async def cmd_fetch(args: argparse.Namespace):
                         "%Y-%m-%dT%H:%M:%SZ"
                     ),
                     "content_type": mime_type,
-                    "document_uri": uri,
+                    "document_uuid": args.uuid,
                     "file_size": len(content),
                 }
                 with open(metadata_file, "w") as f:
@@ -1097,11 +1082,13 @@ Examples:
             cache_parser.print_help()
             sys.exit(1)
 
-    # Override index path if specified
-    if args.index_path:
-        import os
+    # Build config overrides from command-line arguments
+    config_overrides = {}
+    if hasattr(args, "index_path") and args.index_path:
+        config_overrides["index_path"] = args.index_path
 
-        os.environ["INDEX_PATH"] = args.index_path
+    # Attach overrides to args so commands can access them
+    args.config_overrides = config_overrides if config_overrides else None
 
     # Run the command
     try:

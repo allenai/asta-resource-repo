@@ -54,11 +54,11 @@ async def test_file_protocol_url_validation(store, temp_file):
     )
 
     # Should not raise ValidationError
-    uri = await store.store(doc)
-    assert uri.startswith("asta://")
+    uuid = await store.store(doc)
+    assert len(uuid) == 10
 
     # Verify stored correctly
-    retrieved = await store.get(uri)
+    retrieved = await store.get(uuid)
     assert retrieved is not None
     assert retrieved.url == f"file://{temp_file}"
     assert retrieved.mime_type == "text/plain"
@@ -76,7 +76,7 @@ async def test_supported_url_protocols(store):
     for i, url in enumerate(supported_protocols):
         protocol = url.split("://")[0]
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name=f"Test Document {i}",
             url=url,
             summary=f"Test document with {protocol} protocol",
@@ -84,11 +84,11 @@ async def test_supported_url_protocols(store):
         )
 
         # Should not raise ValidationError
-        uri = await store.store(doc)
-        assert uri.startswith("asta://")
+        uuid = await store.store(doc)
+        assert len(uuid) == 10
 
         # Verify it was stored correctly
-        retrieved = await store.get(uri)
+        retrieved = await store.get(uuid)
         assert retrieved is not None
         assert retrieved.url == url
 
@@ -104,17 +104,17 @@ async def test_file_protocol_with_spaces_in_path(store):
         test_file.write_text("Content with spaces in path")
 
         doc = DocumentMetadata(
-            uri="",
+            uuid="",
             name="Test File with Spaces",
             url=f"file://{test_file}",
             summary="Test document with spaces in file path",
             mime_type="text/plain",
         )
 
-        uri = await store.store(doc)
-        assert uri.startswith("asta://")
+        uuid = await store.store(doc)
+        assert len(uuid) == 10
 
-        retrieved = await store.get(uri)
+        retrieved = await store.get(uuid)
         assert retrieved is not None
         assert retrieved.url == f"file://{test_file}"
 
