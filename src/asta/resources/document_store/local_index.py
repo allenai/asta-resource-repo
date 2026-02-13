@@ -140,7 +140,13 @@ class LocalIndexDocumentStore(DocumentStore):
                 # Use file locking to prevent concurrent reads during writes
                 fcntl.flock(f.fileno(), fcntl.LOCK_SH)
                 try:
-                    data = yaml.safe_load(f) or {}
+                    # Use C-based YAML loader for 10-15x faster parsing
+                    Loader = (
+                        yaml.CSafeLoader
+                        if hasattr(yaml, "CSafeLoader")
+                        else yaml.SafeLoader
+                    )
+                    data = yaml.load(f, Loader=Loader) or {}
                 finally:
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 

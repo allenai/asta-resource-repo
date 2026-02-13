@@ -10,7 +10,7 @@ user references an "Asta document" or anything with an `asta://` URI.
 
 This skill provides complete document management functionality for tracking research papers, documentation, and resources using the `asta-documents` CLI.
 
-**What it does:** Track document metadata (URLs, summaries, tags) in a local git-friendly YAML file. Think of it as a smart bookmark manager with powerful search capabilities.
+**What it does:** Track document metadata (URLs, summaries, tags) in a local index. Think of it as a smart bookmark manager with powerful search capabilities.
 
 ## Installation
 
@@ -46,24 +46,24 @@ asta-documents search ".year > 2020" --extra
 asta-documents add <url> --name="Title" --summary="Description" --tags="tag1,tag2" --extra='{"author": "Smith et al", "year": 2024, "venue": "NeurIPS"}'
 
 # Get document metadata
-asta-documents get <asta-uri>
+asta-documents get <uuid>
 
 # Update document
-asta-documents update <asta-uri> --name="New Title" --tags="new,tags"
+asta-documents update <uuid> --name="New Title" --tags="new,tags"
 
 # Fetch document content
-asta-documents fetch <asta-uri> -o /tmp/document.pdf
+asta-documents fetch <uuid> -o /tmp/document.pdf
 
 # Manage tags
-asta-documents add-tags <asta-uri> --tags="new,tags"
-asta-documents remove-tags <asta-uri> --tags="old,tags"
+asta-documents add-tags <uuid> --tags="new,tags"
+asta-documents remove-tags <uuid> --tags="old,tags"
 
 # Cache management
 asta-documents cache list
 asta-documents cache stats
 asta-documents cache clean --days 7
 
-# Index information
+# Summary information (document counts)
 asta-documents show
 ```
 Always use the command line interface for all operations to ensure proper index management and caching. 
@@ -75,7 +75,7 @@ The index store metadata only. The content of a document is retrievable via its 
 
 **Fetch to file (with automatic caching):**
 ```bash
-asta-documents fetch <asta-uri> -o /tmp/document.pdf
+asta-documents fetch <uuid> -o /tmp/document.pdf
 ```
 
 ### Cache Management
@@ -130,11 +130,11 @@ asta-documents search "transformers" --tags
 # Search for relevant documents
 asta-documents search "transformer architecture" --show-scores
 
-# Get metadata for top result
-asta-documents get asta://namespace/uuid
+# Get metadata for top result (using UUID from search results)
+asta-documents get 6MNxGbWGRC
 
 # Fetch content
-asta-documents fetch asta://namespace/uuid -o /tmp/paper.pdf -q
+asta-documents fetch 6MNxGbWGRC -o /tmp/paper.pdf -q
 
 # Read with PDF support
 # Read(/tmp/paper.pdf)
@@ -143,37 +143,37 @@ asta-documents fetch asta://namespace/uuid -o /tmp/paper.pdf -q
 ### Workflow 3: Search with JSON Processing
 
 ```bash
-# Search and extract URIs
+# Search and extract UUIDs
 RESULTS=$(asta-documents search "query" --json)
 
-# Get first URI (example with Python)
-URI=$(echo "$RESULTS" | python3 -c "import sys,json; results=json.load(sys.stdin); print(results[0]['result']['uri'] if results else '')")
+# Get first UUID (example with Python)
+UUID=$(echo "$RESULTS" | python3 -c "import sys,json; results=json.load(sys.stdin); print(results[0]['result']['uuid'] if results else '')")
 
 # Fetch that document
-asta-documents fetch "$URI" -o result.pdf
+asta-documents fetch "$UUID" -o result.pdf
 ```
 
 ### Workflow 4: Bulk Tag Management
 
 ```bash
 # List documents with old tag
-DOCS=$(asta-documents list-by-tags --tags="old-tag" --json)
+DOCS=$(asta-documents list --tags="old-tag" --json)
 
 # For each, remove old tag and add new
-for uri in $(echo "$DOCS" | python3 -c "import sys,json; print('\\n'.join([d['uri'] for d in json.load(sys.stdin)]))"); do
-    asta-documents remove-tags "$uri" --tags="old-tag"
-    asta-documents add-tags "$uri" --tags="new-tag"
+for uuid in $(echo "$DOCS" | python3 -c "import sys,json; print('\\n'.join([d['uuid'] for d in json.load(sys.stdin)]))"); do
+    asta-documents remove-tags "$uuid" --tags="old-tag"
+    asta-documents add-tags "$uuid" --tags="new-tag"
 done
 ```
 
 ### Workflow 5: Update Multiple Fields
 
 ```bash
-# Get current metadata
-asta-documents get asta://namespace/uuid
+# Get current metadata (using UUID)
+asta-documents get 6MNxGbWGRC
 
 # Update multiple fields
-asta-documents update asta://namespace/uuid \
+asta-documents update 6MNxGbWGRC \
   --name="Updated Title" \
   --summary="Updated summary with more details" \
   --tags="updated,revised,2025"

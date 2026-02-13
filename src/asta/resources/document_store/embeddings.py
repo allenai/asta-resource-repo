@@ -2,21 +2,23 @@
 
 import sqlite3
 import struct
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, TYPE_CHECKING
 import logging
+
+if TYPE_CHECKING:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
-# Try to import sentence-transformers, but make it optional
+# Check if sentence-transformers is available without importing it
+# This avoids slow imports at module load time
 try:
-    from sentence_transformers import SentenceTransformer
-    import numpy as np
+    import importlib.util
 
-    EMBEDDINGS_AVAILABLE = True
-except ImportError:
+    EMBEDDINGS_AVAILABLE = importlib.util.find_spec("sentence_transformers") is not None
+except Exception:
     EMBEDDINGS_AVAILABLE = False
-    SentenceTransformer = None
-    np = None
 
 
 class EmbeddingManager:
@@ -39,7 +41,7 @@ class EmbeddingManager:
         """
         self.conn = conn
         self.model_name = model_name
-        self._model: Optional[SentenceTransformer] = None
+        self._model: Optional["SentenceTransformer"] = None
         self._dimension: Optional[int] = None
 
         if not EMBEDDINGS_AVAILABLE:
@@ -53,6 +55,9 @@ class EmbeddingManager:
             raise ImportError("sentence-transformers not available.")
 
         if self._model is None:
+            # Import heavy dependencies only when actually needed
+            from sentence_transformers import SentenceTransformer
+
             logger.info(f"Loading embedding model: {self.model_name}")
             self._model = SentenceTransformer(self.model_name)
             # Get dimension by encoding a test string
@@ -80,6 +85,8 @@ class EmbeddingManager:
         Returns:
             Embedding vector as numpy array (float32)
         """
+        import numpy as np
+
         self._load_model()
 
         if not text:
@@ -112,6 +119,8 @@ class EmbeddingManager:
         Returns:
             Numpy array (float32)
         """
+        import numpy as np
+
         if not data:
             return None
 
@@ -208,6 +217,8 @@ class EmbeddingManager:
         Returns:
             Cosine similarity (0-1, higher is more similar)
         """
+        import numpy as np
+
         # Normalize vectors
         norm1 = np.linalg.norm(vec1)
         norm2 = np.linalg.norm(vec2)
