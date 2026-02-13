@@ -71,7 +71,7 @@ Avoid direct read/write operations on the index file.
 
 ## Fetch Document Content
 
-The index store metadata only. The content of a document is retrievable via its URL. The `fetch` command retrieves the content and caches it locally for future use.
+The index stores metadata only. The content of a document is retrievable via its URL. The `fetch` command retrieves the content and caches it locally for future use.
 
 **Fetch to file (with automatic caching):**
 ```bash
