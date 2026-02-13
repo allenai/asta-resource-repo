@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The Asta Resource Repository is a lightweight, git-friendly document metadata index that requires zero external dependencies. It provides a CLI (`asta-documents`) and Claude Code skill for managing document metadata locally.
 
-**Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by URIs in the format `asta://{namespace}/{uuid}`.
+**Key Concept**: Instead of storing document content, this tool maintains an index of metadata (URLs, summaries, tags) in a local YAML file. Documents are identified by **UUIDs** (10-character alphanumeric short IDs).
 
 **Integration**: The primary integration method is the **Asta Documents skill** (`skills/asta-documents.md`) which provides complete functionality via CLI commands.
 
@@ -64,7 +64,6 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
    - `DocumentMetadata`: Metadata-only model (no content field)
    - `SearchHit`: Search result with relevance score
    - Fields: `uuid` (10-char short ID), `name`, `url`, `summary`, `tags`, `mime_type`, `created_at`, `modified_at`, `extra`
-   - Runtime field: `uri` (computed property that reconstructs full URI from namespace + uuid)
 
 8. **`config/`**: HOCON-based configuration
     - Search parameters (BM25 k1/b, field weights)
@@ -86,10 +85,6 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 - `uuid`: 10-character alphanumeric short ID (auto-generated, stored in YAML)
 - `created_at`: Auto-set on creation
 - `modified_at`: Auto-updated on changes
-
-**Runtime-only fields (not stored in YAML):**
-- `uri`: Full URI computed from namespace + uuid (format: `asta://{namespace}/{uuid}`)
-- `_namespace`: Derived from git repository, injected at runtime
 
 **Optional fields:**
 - `extra`: Dict for additional metadata (author, year, venue, etc.)
@@ -117,10 +112,9 @@ documents:
 ```
 
 **Storage format notes:**
-- Only `uuid` field is stored (not full `uri`)
-- Full URI (`asta://allenai/asta-resource-repo/6MNxGbWGRC`) is reconstructed at runtime
-- Namespace is derived from git repository location and injected into loaded documents
-- This reduces YAML file size by ~20-30% compared to storing full URIs
+- Documents are identified solely by their `uuid` field
+- No namespace or URI concepts - just simple 10-character IDs
+- Clean YAML format with minimal overhead
 
 ### Short ID Implementation
 
@@ -141,22 +135,17 @@ The system uses **10-character base62-encoded short IDs** instead of traditional
 **Benefits:**
 - **72% reduction in UUID length** (36 chars → 10 chars)
 - **~20-30% smaller YAML files** (estimated)
-- **More readable URIs** in CLI output and git diffs
+- **More readable IDs** in CLI output and git diffs
 - **URL-safe** (no special characters requiring encoding)
 
 **Example:**
 ```python
-# Old format (36 chars)
-asta://namespace/550e8400-e29b-41d4-a716-446655440000
+# Traditional UUID (36 chars)
+550e8400-e29b-41d4-a716-446655440000
 
-# New format (10 chars)
-asta://namespace/6MNxGbWGRC
+# Short ID (10 chars)
+6MNxGbWGRC
 ```
-
-**URI Parsing:**
-- Location: `model.py` functions `parse_document_uri()` and `construct_document_uri()`
-- Validates 10-character alphanumeric format
-- Rejects invalid formats (wrong length, special characters, etc.)
 
 ## Search System
 
@@ -553,29 +542,6 @@ allowed_mime_types = [
 - `CONFIG_FILE`: Use different config file
 - `ENV`: Load environment-specific config (e.g., `production.conf`)
 
-## Namespace Derivation
-
-**Namespaces are automatically derived at runtime** from the git repository context:
-
-**In a git repository with remote:**
-- Format: `{owner}/{repo}`
-- Example: `allenai/asta-resource-repo`
-- URIs: `asta://allenai/asta-resource-repo/6MNxGbWGRC` (10-char short ID)
-- Benefit: URIs are persistent and shareable across all team members and branches
-- URIs remain valid when merging between branches
-
-**Outside git or no remote:**
-- Format: `local:{absolute_path}`
-- Example: `local:/Users/you/project/.asta/documents/index.yaml`
-- URIs: `asta://local:/Users/you/project/.asta/documents/index.yaml/6MNxGbWGRC` (10-char short ID)
-- Benefit: Still works without git
-
-**No branch isolation:**
-- All branches in the same repository share the same namespace
-- Feature branches and main branch use identical namespaces
-- URIs created on feature branches work after merging to main
-- This supports normal git merge workflows
-
 ## Git Tracking
 
 **Recommended for teams:**
@@ -587,14 +553,13 @@ git push
 ```
 
 When tracked in git:
-- ✅ Team members get same URIs (same namespace = same URIs)
+- ✅ Team members get same UUIDs (documents are universally identifiable)
 - ✅ Git shows readable diffs when documents change
 - ✅ Document metadata is versioned alongside code
 
 **Personal use (untracked):**
 - `.gitignore` allows tracking `.asta/documents/index.yaml` but ignores other `.asta/` files
 - If not committed, the index is local-only
-- URIs still use git-based namespaces but aren't portable across machines
 
 ## CLI Commands
 
@@ -645,33 +610,33 @@ uv run asta-documents search ".year > 2020" --extra
 uv run asta-documents search ".author contains Vaswani" --extra
 uv run asta-documents search ".venue == NeurIPS" --extra
 
-# Get specific document
-uv run asta-documents get asta://owner/repo/UUID
+# Get specific document by UUID
+uv run asta-documents get 6MNxGbWGRC
 
 # Update document metadata
-uv run asta-documents update asta://owner/repo/UUID \
+uv run asta-documents update 6MNxGbWGRC \
   --name="Updated Title" \
   --summary="Updated summary text" \
   --tags="updated,revised"
 
 # Update with JSON output
-uv run asta-documents --json update asta://owner/repo/UUID \
+uv run asta-documents --json update 6MNxGbWGRC \
   --name="New Title"
 
 # Remove document
-uv run asta-documents remove asta://owner/repo/UUID
+uv run asta-documents remove 6MNxGbWGRC
 
 # Show index information
 uv run asta-documents show
 
 # Fetch document content (with automatic caching)
-uv run asta-documents fetch asta://owner/repo/UUID -o document.pdf
+uv run asta-documents fetch 6MNxGbWGRC -o document.pdf
 
 # Fetch to stdout
-uv run asta-documents fetch asta://owner/repo/UUID > document.pdf
+uv run asta-documents fetch 6MNxGbWGRC > document.pdf
 
 # Force refresh (bypass cache)
-uv run asta-documents fetch asta://owner/repo/UUID -o document.pdf --force
+uv run asta-documents fetch 6MNxGbWGRC -o document.pdf --force
 
 # Cache management
 uv run asta-documents cache list              # List cached items
@@ -699,8 +664,8 @@ The CLI includes built-in content fetching with automatic caching:
 **Workflow for reading document content:**
 
 ```bash
-# 1. Fetch document (uses cache if available)
-uv run asta-documents fetch asta://namespace/uuid -o /tmp/doc.pdf
+# 1. Fetch document by UUID (uses cache if available)
+uv run asta-documents fetch 6MNxGbWGRC -o /tmp/doc.pdf
 
 # 2. Use Read tool to extract and display content
 # Read(/tmp/doc.pdf)
@@ -741,7 +706,7 @@ curl -o ~/.claude/skills/asta-documents.md https://raw.githubusercontent.com/all
 
 💬 "Use /asta-documents to search for papers about attention mechanisms"
 
-💬 "Use /asta-documents to fetch asta://namespace/uuid"
+💬 "Use /asta-documents to fetch document 6MNxGbWGRC"
 ```
 
 **The skill provides:**
@@ -847,8 +812,8 @@ Complete document management for tracking research papers, documentation, and re
 **Simplified workflow for fetching content:**
 
 ```bash
-# 1. Fetch document content (automatic caching)
-asta-documents fetch asta://namespace/uuid -o /tmp/document.pdf
+# 1. Fetch document content by UUID (automatic caching)
+asta-documents fetch 6MNxGbWGRC -o /tmp/document.pdf
 
 # 2. Use Read tool to extract and display
 # Read(/tmp/document.pdf)
@@ -888,16 +853,16 @@ asta-documents cache info <hash>
 
 **Example workflow:**
 ```
-User: "Show me the Introduction from asta://allenai/asta-resource-repo/abc-123"
+User: "Show me the Introduction from document 6MNxGbWGRC"
 
 Agent workflow:
-1. asta-documents fetch asta://...abc-123 -o /tmp/doc.pdf -q
+1. asta-documents fetch 6MNxGbWGRC -o /tmp/doc.pdf -q
 2. Read(/tmp/doc.pdf) - Claude extracts and displays the Introduction
 
 User: "Show me the Methods section" (same document)
 
 Agent workflow:
-1. asta-documents fetch asta://...abc-123 -o /tmp/doc.pdf -q
+1. asta-documents fetch 6MNxGbWGRC -o /tmp/doc.pdf -q
    # Uses cache instantly (no re-download)
 2. Read(/tmp/doc.pdf) - Claude extracts and displays Methods
 ```
@@ -971,8 +936,7 @@ The CLI converts exceptions to user-friendly error messages.
 ## Important Notes
 
 - **Always use `uv run`**: This project uses `uv` for dependency management
-- **URI Format**: All document URIs follow `asta://{namespace}/{uuid}` where namespace is auto-derived from git
-- **Namespace Derivation**: Automatic from git repo (no configuration needed)
+- **UUID-Based**: Documents are identified by 10-character alphanumeric UUIDs
 - **Git-Friendly**: `.asta/documents/index.yaml` should be committed for team sharing
 - **Async/Await**: All document store operations are async for future extensibility
 - **YAML Serialization**: Pydantic's `model_dump()` handles datetime serialization automatically
@@ -1039,8 +1003,8 @@ uv run asta-documents search "Attention" --name
 uv run asta-documents search "ai,transformers" --tags
 uv run asta-documents search ".year > 2015" --extra
 
-# Update document metadata (use URI from add command output)
-uv run asta-documents update asta://allenai/asta-resource-repo/6MNxGbWGRC \
+# Update document metadata (use UUID from add command output)
+uv run asta-documents update 6MNxGbWGRC \
   --tags="ai,nlp,transformers,updated"
 
 # View the index file directly
