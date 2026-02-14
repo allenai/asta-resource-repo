@@ -150,7 +150,7 @@ asta-documents fetch "$UUID" --index-path "$TEMP_INDEX" -o result.pdf
 - Remote indexes accessed this way are read-only (no add/update/remove operations)
 - Downloaded indexes can be cached locally to avoid repeated downloads
 - The index URL portion is URL-encoded and must be decoded before use
-- The decoded URL can use any protocol supported by curl (http, https, file, etc.)
+- The decoded URL supports: http://, https://, file://, s3://, gs://
 - Always validate the index file exists and is valid YAML before using it
 
 **Complete Example Workflow:**
@@ -192,6 +192,59 @@ The index stores metadata only. The content of a document is retrievable via its
 **Fetch to file (with automatic caching):**
 ```bash
 asta-documents fetch <uuid> -o /tmp/document.pdf
+```
+
+### Supported URL Protocols
+
+The system supports multiple protocols for document URLs:
+
+**Local and Web:**
+- `http://` and `https://` - Web URLs (uses curl)
+- `file://` - Local file system (uses curl)
+
+**Cloud Storage:**
+- `s3://` - Amazon S3 (requires AWS CLI)
+- `gs://` - Google Cloud Storage (requires gsutil)
+
+**Cloud Storage Setup:**
+
+For S3:
+```bash
+# Install AWS CLI
+brew install awscli  # macOS
+pip install awscli   # or via pip
+
+# Configure credentials
+aws configure
+# Or use: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_PROFILE
+```
+
+For GCS:
+```bash
+# Install Google Cloud SDK
+brew install --cask google-cloud-sdk  # macOS
+
+# Authenticate
+gcloud auth login
+# Or use: GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+**Examples:**
+```bash
+# Add document from S3
+asta-documents add s3://my-bucket/papers/research.pdf \
+  --name="Research Paper" \
+  --summary="ML research findings" \
+  --tags="ml,research"
+
+# Add document from GCS
+asta-documents add gs://my-bucket/docs/spec.pdf \
+  --name="Technical Spec" \
+  --summary="System specifications" \
+  --tags="docs"
+
+# Fetch works the same for all protocols
+asta-documents fetch <uuid> -o local-copy.pdf
 ```
 
 ### Cache Management
