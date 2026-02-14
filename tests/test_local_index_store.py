@@ -90,6 +90,8 @@ async def test_store_accepts_various_url_protocols(store):
         "http://example.com/doc.pdf",
         "https://example.com/doc.pdf",
         "file:///path/to/document.pdf",
+        "s3://my-bucket/path/to/doc.pdf",
+        "gs://my-bucket/path/to/doc.pdf",
     ]
 
     for i, url in enumerate(protocols):
@@ -910,6 +912,8 @@ async def test_update_accepts_various_url_protocols(store):
     protocols = [
         "http://example.com/new.pdf",
         "file:///path/to/new.pdf",
+        "s3://my-bucket/new.pdf",
+        "gs://my-bucket/new.pdf",
     ]
 
     for url in protocols:

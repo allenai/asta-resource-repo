@@ -679,6 +679,46 @@ async def cmd_cache_info(args: argparse.Namespace):
         print("⚠️  Cache is stale (> 7 days old)")
 
 
+def fetch_content_by_protocol(url: str) -> bytes:
+    """Fetch content from URL using the appropriate tool based on protocol.
+
+    Args:
+        url: The URL to fetch (http://, https://, file://, s3://, gs://)
+
+    Returns:
+        The content as bytes
+
+    Raises:
+        subprocess.CalledProcessError: If the fetch command fails
+        ValueError: If the protocol is not supported
+    """
+    protocol = url.split("://")[0] if "://" in url else ""
+
+    if protocol in ("http", "https", "file"):
+        # Use curl for http, https, and file protocols
+        result = subprocess.run(
+            ["curl", "-L", "-f", "-s", url], capture_output=True, check=True
+        )
+        return result.stdout
+    elif protocol == "s3":
+        # Use AWS CLI for S3
+        # aws s3 cp writes to stdout by default with "-" as destination
+        result = subprocess.run(
+            ["aws", "s3", "cp", url, "-"], capture_output=True, check=True
+        )
+        return result.stdout
+    elif protocol == "gs":
+        # Use gsutil for Google Cloud Storage
+        # gsutil cat outputs to stdout
+        result = subprocess.run(["gsutil", "cat", url], capture_output=True, check=True)
+        return result.stdout
+    else:
+        raise ValueError(
+            f"Unsupported protocol: {protocol}. "
+            f"Supported protocols: http, https, file, s3, gs"
+        )
+
+
 async def cmd_fetch(args: argparse.Namespace):
     """Fetch content from URL with caching."""
     # Get document metadata
@@ -725,10 +765,7 @@ async def cmd_fetch(args: argparse.Namespace):
                 print(f"Fetching: {url}", file=sys.stderr)
 
             try:
-                result = subprocess.run(
-                    ["curl", "-L", "-f", "-s", url], capture_output=True, check=True
-                )
-                content = result.stdout
+                content = fetch_content_by_protocol(url)
 
                 # Save to cache
                 cache_dir.mkdir(parents=True, exist_ok=True)
@@ -752,6 +789,9 @@ async def cmd_fetch(args: argparse.Namespace):
 
             except subprocess.CalledProcessError as e:
                 print(f"Error fetching content: {e}", file=sys.stderr)
+                sys.exit(1)
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
                 sys.exit(1)
 
         # Output

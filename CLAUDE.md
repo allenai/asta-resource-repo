@@ -75,7 +75,7 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
 ### DocumentMetadata Fields
 
 **Required fields:**
-- `url`: Where the actual document content lives (supported protocols: `http://`, `https://`, `file://`)
+- `url`: Where the actual document content lives (supported protocols: `http://`, `https://`, `file://`, `s3://`, `gs://`)
 - `name`: Document title/name
 - `summary`: Text description for search (required for all documents)
 - `mime_type`: Document MIME type (e.g., `application/pdf`, `text/plain`)
@@ -146,6 +146,74 @@ The system uses **10-character base62-encoded short IDs** instead of traditional
 # Short ID (10 chars)
 6MNxGbWGRC
 ```
+
+## Cloud Storage Support
+
+The system supports fetching documents from cloud storage services in addition to HTTP/HTTPS and local file:// URLs.
+
+### Supported Protocols
+
+**Local and Web:**
+- `http://` and `https://` - Web URLs (uses curl)
+- `file://` - Local file system (uses curl)
+
+**Cloud Storage:**
+- `s3://` - Amazon S3 (uses AWS CLI)
+- `gs://` - Google Cloud Storage (uses gsutil)
+
+### Prerequisites
+
+**For S3 URLs (`s3://`):**
+```bash
+# Install AWS CLI
+brew install awscli  # macOS
+# or: pip install awscli
+
+# Configure credentials
+aws configure
+# Or use environment variables:
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION
+# Or use AWS_PROFILE for named profiles
+```
+
+**For GCS URLs (`gs://`):**
+```bash
+# Install gsutil (part of Google Cloud SDK)
+brew install --cask google-cloud-sdk  # macOS
+# or: pip install gsutil
+
+# Configure credentials
+gcloud auth login
+# Or use service account:
+# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+```
+
+### Usage Examples
+
+```bash
+# Add document from S3
+uv run asta-documents add s3://my-bucket/papers/paper.pdf \
+  --name="Research Paper" \
+  --summary="Important research findings" \
+  --tags="research,ml" \
+  --mime-type="application/pdf"
+
+# Add document from Google Cloud Storage
+uv run asta-documents add gs://my-bucket/docs/document.pdf \
+  --name="Technical Document" \
+  --summary="Technical specifications" \
+  --tags="docs,specs" \
+  --mime-type="application/pdf"
+
+# Fetch from cloud storage (automatic caching)
+uv run asta-documents fetch <uuid> -o local-copy.pdf
+```
+
+**Notes:**
+- Cloud storage credentials must be configured before fetching
+- The fetch command will use cached content when available (default: 7 days)
+- Cache works identically for all protocols (http, https, file, s3, gs)
+- The CLI tools (aws, gsutil) must be installed and in PATH
 
 ## Search System
 

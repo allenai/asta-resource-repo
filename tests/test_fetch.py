@@ -2,10 +2,12 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import pytest_asyncio
 
+from asta.resources.cli.index_cli import fetch_content_by_protocol
 from asta.resources.document_store.local_index import LocalIndexDocumentStore
 from asta.resources.model import DocumentMetadata
 
@@ -71,6 +73,8 @@ async def test_supported_url_protocols(store):
         "http://example.com/doc.pdf",
         "https://example.com/doc.pdf",
         "file:///path/to/document.pdf",
+        "s3://my-bucket/path/to/doc.pdf",
+        "gs://my-bucket/path/to/doc.pdf",
     ]
 
     for i, url in enumerate(supported_protocols):
@@ -162,3 +166,105 @@ async def test_multiple_file_protocol_documents(store, temp_file):
         # Cleanup temp files
         for file_path in temp_files[1:]:  # Skip first one (handled by fixture)
             Path(file_path).unlink(missing_ok=True)
+
+
+def test_fetch_content_by_protocol_http():
+    """Test fetch_content_by_protocol uses curl for HTTP URLs."""
+    with patch("subprocess.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.stdout = b"http content"
+        mock_run.return_value = mock_result
+
+        content = fetch_content_by_protocol("http://example.com/doc.pdf")
+
+        assert content == b"http content"
+        mock_run.assert_called_once_with(
+            ["curl", "-L", "-f", "-s", "http://example.com/doc.pdf"],
+            capture_output=True,
+            check=True,
+        )
+
+
+def test_fetch_content_by_protocol_https():
+    """Test fetch_content_by_protocol uses curl for HTTPS URLs."""
+    with patch("subprocess.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.stdout = b"https content"
+        mock_run.return_value = mock_result
+
+        content = fetch_content_by_protocol("https://example.com/doc.pdf")
+
+        assert content == b"https content"
+        mock_run.assert_called_once_with(
+            ["curl", "-L", "-f", "-s", "https://example.com/doc.pdf"],
+            capture_output=True,
+            check=True,
+        )
+
+
+def test_fetch_content_by_protocol_file():
+    """Test fetch_content_by_protocol uses curl for file:// URLs."""
+    with patch("subprocess.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.stdout = b"file content"
+        mock_run.return_value = mock_result
+
+        content = fetch_content_by_protocol("file:///path/to/doc.pdf")
+
+        assert content == b"file content"
+        mock_run.assert_called_once_with(
+            ["curl", "-L", "-f", "-s", "file:///path/to/doc.pdf"],
+            capture_output=True,
+            check=True,
+        )
+
+
+def test_fetch_content_by_protocol_s3():
+    """Test fetch_content_by_protocol uses AWS CLI for S3 URLs."""
+    with patch("subprocess.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.stdout = b"s3 content"
+        mock_run.return_value = mock_result
+
+        content = fetch_content_by_protocol("s3://my-bucket/path/to/doc.pdf")
+
+        assert content == b"s3 content"
+        mock_run.assert_called_once_with(
+            ["aws", "s3", "cp", "s3://my-bucket/path/to/doc.pdf", "-"],
+            capture_output=True,
+            check=True,
+        )
+
+
+def test_fetch_content_by_protocol_gs():
+    """Test fetch_content_by_protocol uses gsutil for GCS URLs."""
+    with patch("subprocess.run") as mock_run:
+        mock_result = MagicMock()
+        mock_result.stdout = b"gs content"
+        mock_run.return_value = mock_result
+
+        content = fetch_content_by_protocol("gs://my-bucket/path/to/doc.pdf")
+
+        assert content == b"gs content"
+        mock_run.assert_called_once_with(
+            ["gsutil", "cat", "gs://my-bucket/path/to/doc.pdf"],
+            capture_output=True,
+            check=True,
+        )
+
+
+def test_fetch_content_by_protocol_unsupported():
+    """Test fetch_content_by_protocol raises ValueError for unsupported protocols."""
+    with pytest.raises(ValueError) as exc_info:
+        fetch_content_by_protocol("ftp://example.com/doc.pdf")
+
+    assert "Unsupported protocol: ftp" in str(exc_info.value)
+    assert "http, https, file, s3, gs" in str(exc_info.value)
+
+
+def test_fetch_content_by_protocol_no_protocol():
+    """Test fetch_content_by_protocol raises ValueError for URLs without protocol."""
+    with pytest.raises(ValueError) as exc_info:
+        fetch_content_by_protocol("example.com/doc.pdf")
+
+    assert "Unsupported protocol" in str(exc_info.value)
