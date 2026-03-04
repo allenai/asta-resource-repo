@@ -17,6 +17,7 @@ from ..config import load_config
 from ..model import DocumentMetadata
 from ..exceptions import ValidationError, DocumentServiceError
 from ..document_store.local_index import LocalIndexDocumentStore
+from .. import __version__
 
 
 def format_document(doc: DocumentMetadata, verbose: bool = False) -> str:
@@ -877,6 +878,12 @@ Examples:
     )
 
     # Global options
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"asta-documents {__version__}",
+        help="Show version and exit",
+    )
     parser.add_argument(
         "--json",
         action="store_true",
