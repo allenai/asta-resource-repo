@@ -12,6 +12,7 @@ on:
         type: string
 
 permissions:
+  contents: read   # Required to checkout code (especially for private repos)
   id-token: write  # Required for PyPI trusted publishing
 
 jobs:
