@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "asta-resource-repository"
 version = "0.2.0"
 description = "Lightweight document metadata index with CLI and skill support"
-authors = [{name = "Asta Resource Repository Team"}]
-license = {text = "MIT"}
+authors = [{name = "Asta Team"}]
+license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
