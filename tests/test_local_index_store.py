@@ -2246,3 +2246,362 @@ async def test_multi_field_search_hierarchical_scoring(store):
 
     assert len(results_summary) == 3
     # All documents match, actual ranking depends on semantic search
+
+
+# ============================================================================
+# Path Normalization Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_store_converts_file_url_within_repo_to_relative_path(temp_index_path):
+    """Test that file:// URLs within index parent dir are converted to relative paths"""
+    # Create store with temp index
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Create a document file within the index's parent directory
+        # If index is at /path/.asta/documents/index.yaml, parent is /path/.asta/documents/
+        index_parent = temp_index_path.parent
+        docs_dir = index_parent / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        doc_file = docs_dir / "paper.pdf"
+        doc_file.touch()
+
+        # Add document with file:// URL
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Document",
+            url=f"file://{doc_file.as_posix()}",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+
+        uuid = await store.store(doc)
+
+        # Verify the URL was converted to relative path
+        stored_doc = await store.get(uuid)
+        assert stored_doc is not None
+        assert stored_doc.url == "docs/paper.pdf"
+        assert "file://" not in stored_doc.url
+        assert not Path(stored_doc.url).is_absolute()
+
+
+@pytest.mark.asyncio
+async def test_store_converts_absolute_path_within_repo_to_relative_path(
+    temp_index_path,
+):
+    """Test that absolute paths within index parent dir are converted to relative paths"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Create a document file within the index's parent directory
+        index_parent = temp_index_path.parent
+        docs_dir = index_parent / "papers" / "2024"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        doc_file = docs_dir / "research.pdf"
+        doc_file.touch()
+
+        # Add document with absolute path
+        doc = DocumentMetadata(
+            uuid="",
+            name="Research Paper",
+            url=str(doc_file.resolve()),
+            summary="A research paper",
+            mime_type="application/pdf",
+        )
+
+        uuid = await store.store(doc)
+
+        # Verify the URL was converted to relative path
+        stored_doc = await store.get(uuid)
+        assert stored_doc is not None
+        assert stored_doc.url == "papers/2024/research.pdf"
+        assert not Path(stored_doc.url).is_absolute()
+
+
+@pytest.mark.asyncio
+async def test_store_keeps_file_url_outside_repo_as_absolute(temp_index_path):
+    """Test that file:// URLs outside repo stay as file:// URLs"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Create a file outside the repo
+        with tempfile.TemporaryDirectory() as other_tmpdir:
+            doc_file = Path(other_tmpdir) / "external.pdf"
+            doc_file.touch()
+
+            # Add document with file:// URL outside repo
+            doc = DocumentMetadata(
+                uuid="",
+                name="External Document",
+                url=f"file://{doc_file.as_posix()}",
+                summary="An external document",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            # Verify the URL is still a file:// URL (not relative)
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url.startswith("file://")
+            assert str(doc_file.resolve().as_posix()) in stored_doc.url
+
+
+@pytest.mark.asyncio
+async def test_store_keeps_http_urls_unchanged(temp_index_path):
+    """Test that HTTP/HTTPS URLs are not modified"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        urls = [
+            "https://example.com/paper.pdf",
+            "http://example.com/paper.pdf",
+        ]
+
+        for url in urls:
+            doc = DocumentMetadata(
+                uuid="",
+                name="Web Document",
+                url=url,
+                summary="A web document",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url == url
+
+
+@pytest.mark.asyncio
+async def test_store_keeps_cloud_urls_unchanged(temp_index_path):
+    """Test that S3/GCS URLs are not modified"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        urls = [
+            "s3://my-bucket/papers/paper.pdf",
+            "gs://my-bucket/papers/paper.pdf",
+        ]
+
+        for url in urls:
+            doc = DocumentMetadata(
+                uuid="",
+                name="Cloud Document",
+                url=url,
+                summary="A cloud document",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url == url
+
+
+@pytest.mark.asyncio
+async def test_update_converts_file_url_to_relative_path(temp_index_path):
+    """Test that updating with file:// URL converts to relative path"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Create initial document with HTTP URL
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Document",
+            url="https://example.com/old.pdf",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+
+        uuid = await store.store(doc)
+
+        # Create a local file within index parent directory
+        index_parent = temp_index_path.parent
+        docs_dir = index_parent / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        doc_file = docs_dir / "new.pdf"
+        doc_file.touch()
+
+        # Update with file:// URL
+        updated = await store.update(uuid, url=f"file://{doc_file.as_posix()}")
+
+        # Verify URL was converted to relative path
+        assert updated.url == "docs/new.pdf"
+        assert "file://" not in updated.url
+        assert not Path(updated.url).is_absolute()
+
+
+@pytest.mark.asyncio
+async def test_yaml_index_contains_relative_paths(temp_index_path):
+    """Test that the YAML index file contains relative paths for local files"""
+    store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+    async with store:
+        # Create a document file within index parent directory
+        index_parent = temp_index_path.parent
+        docs_dir = index_parent / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        doc_file = docs_dir / "paper.pdf"
+        doc_file.touch()
+
+        # Add document
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Document",
+            url=f"file://{doc_file.as_posix()}",
+            summary="A test document",
+            mime_type="application/pdf",
+        )
+
+        await store.store(doc)
+
+    # Read the YAML file directly
+    with open(temp_index_path, "r") as f:
+        index_data = yaml.safe_load(f)
+
+    # Verify the YAML contains relative path
+    assert len(index_data["documents"]) == 1
+    assert index_data["documents"][0]["url"] == "docs/paper.pdf"
+    assert "file://" not in index_data["documents"][0]["url"]
+
+
+# ============================================================================
+# Custom Index Path Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_custom_index_path_converts_to_relative():
+    """Test that custom index paths (outside .asta) convert local files to relative paths"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create custom index file (not in .asta directory)
+        custom_index = tmpdir / "my-index.yaml"
+
+        store = LocalIndexDocumentStore(index_path=str(custom_index))
+
+        async with store:
+            # Create a document file in same directory
+            doc_file = tmpdir / "document.pdf"
+            doc_file.touch()
+
+            # Add document with absolute path
+            doc = DocumentMetadata(
+                uuid="",
+                name="Test Document",
+                url=str(doc_file.resolve()),
+                summary="A test document",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            # Verify converted to relative path
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url == "document.pdf"
+            assert not Path(stored_doc.url).is_absolute()
+
+
+@pytest.mark.asyncio
+async def test_custom_index_with_subdirectories():
+    """Test custom index path with documents in subdirectories"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create custom index at root
+        custom_index = tmpdir / "index.yaml"
+
+        store = LocalIndexDocumentStore(index_path=str(custom_index))
+
+        async with store:
+            # Create documents in subdirectories
+            papers_dir = tmpdir / "papers" / "2024"
+            papers_dir.mkdir(parents=True)
+            paper_file = papers_dir / "research.pdf"
+            paper_file.touch()
+
+            # Add with file:// URL
+            doc = DocumentMetadata(
+                uuid="",
+                name="Research Paper",
+                url=f"file://{paper_file.as_posix()}",
+                summary="Research findings",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            # Verify converted to relative path
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url == "papers/2024/research.pdf"
+
+
+@pytest.mark.asyncio
+async def test_custom_index_external_files_stay_absolute():
+    """Test that external files remain as file:// URLs with custom index"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create custom index
+        custom_index = tmpdir / "index.yaml"
+
+        store = LocalIndexDocumentStore(index_path=str(custom_index))
+
+        async with store:
+            # Create file outside the index directory
+            with tempfile.TemporaryDirectory() as other_dir:
+                external_file = Path(other_dir) / "external.pdf"
+                external_file.touch()
+
+                # Add external document
+                doc = DocumentMetadata(
+                    uuid="",
+                    name="External Document",
+                    url=f"file://{external_file.as_posix()}",
+                    summary="External file",
+                    mime_type="application/pdf",
+                )
+
+                uuid = await store.store(doc)
+
+                # Verify stays as file:// URL
+                stored_doc = await store.get(uuid)
+                assert stored_doc is not None
+                assert stored_doc.url.startswith("file://")
+                assert str(external_file.resolve().as_posix()) in stored_doc.url
+
+
+@pytest.mark.asyncio
+async def test_standard_asta_structure_still_works():
+    """Test that files within index parent dir work with any index location"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Create a nested directory structure for index
+        asta_dir = tmpdir / ".asta" / "documents"
+        asta_dir.mkdir(parents=True)
+        index_path = asta_dir / "index.yaml"
+
+        store = LocalIndexDocumentStore(index_path=str(index_path))
+
+        async with store:
+            # Create document within index parent directory (.asta/documents/)
+            doc_file = asta_dir / "README.pdf"
+            doc_file.touch()
+
+            # Add document
+            doc = DocumentMetadata(
+                uuid="",
+                name="README",
+                url=str(doc_file.resolve()),
+                summary="Project README",
+                mime_type="application/pdf",
+            )
+
+            uuid = await store.store(doc)
+
+            # Verify converted to relative path
+            stored_doc = await store.get(uuid)
+            assert stored_doc is not None
+            assert stored_doc.url == "README.pdf"

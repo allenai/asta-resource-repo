@@ -13,6 +13,7 @@ from ..model import (
 )
 from ..exceptions import ValidationError, DocumentServiceError
 from ..utils.short_id import generate_unique_short_id
+from ..utils.path_utils import normalize_file_url
 from .base import DocumentStore
 from .search_cache import SearchCache
 from .bm25_ranker import BM25Ranker
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 class LocalIndexDocumentStore(DocumentStore):
     """Document store that maintains a local YAML index of document metadata
 
-    Stores only metadata (no content) in a git-friendly YAML file at .asta/documents/index.yaml
+    Stores only metadata (no content) in a git-friendly YAML file.
     Designed for single-user, local-only usage with zero external dependencies.
     """
 
@@ -111,7 +112,7 @@ class LocalIndexDocumentStore(DocumentStore):
         if self._initialized:
             return
 
-        # Create .asta/documents directory if it doesn't exist
+        # Create parent directory for index file if it doesn't exist
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Create empty index file if it doesn't exist
@@ -265,10 +266,32 @@ class LocalIndexDocumentStore(DocumentStore):
         # Validate URL format
         if not document.url:
             raise ValidationError("Document URL is required")
-        if "://" not in document.url:
+
+        # Normalize file URLs to relative paths when within repository
+        document.url = normalize_file_url(document.url, self.index_path)
+
+        # Validate URL format
+        if "://" in document.url:
+            # Has protocol scheme - valid
+            pass
+        elif Path(document.url).is_absolute():
+            # Absolute path without protocol - should have been converted by normalize_file_url
+            # If it wasn't, it means it couldn't be processed properly
             raise ValidationError(
-                f"Invalid URL format: {document.url}. Must include a protocol scheme (e.g., http://, https://, file://, s3://, gs://)"
+                f"Invalid URL format: {document.url}. Absolute paths should include file:// protocol."
             )
+        else:
+            # Relative path or invalid format
+            # Valid relative paths should contain path separators or file extensions
+            url_path = Path(document.url)
+            if "/" in document.url or "\\" in document.url or url_path.suffix:
+                # Looks like a valid relative path (has separators or file extension)
+                pass
+            else:
+                # Doesn't look like a valid path or URL
+                raise ValidationError(
+                    f"Invalid URL format: {document.url}. Must include a protocol scheme (e.g., http://, https://, file://, s3://, gs://) or be a valid file path."
+                )
 
         # Validate required fields
         if not document.summary:
@@ -1068,10 +1091,31 @@ class LocalIndexDocumentStore(DocumentStore):
         if url is not None:
             if not url.strip():
                 raise ValidationError("Document URL cannot be empty")
-            if "://" not in url:
+
+            # Normalize file URLs to relative paths when within repository
+            url = normalize_file_url(url, self.index_path)
+
+            # Validate URL format
+            if "://" in url:
+                # Has protocol scheme - valid
+                pass
+            elif Path(url).is_absolute():
+                # Absolute path without protocol
                 raise ValidationError(
-                    f"Invalid URL format: {url}. Must include a protocol scheme (e.g., http://, https://, file://)"
+                    f"Invalid URL format: {url}. Absolute paths should include file:// protocol."
                 )
+            else:
+                # Relative path or invalid format
+                # Valid relative paths should contain path separators or file extensions
+                url_path = Path(url)
+                if "/" in url or "\\" in url or url_path.suffix:
+                    # Looks like a valid relative path (has separators or file extension)
+                    pass
+                else:
+                    # Doesn't look like a valid path or URL
+                    raise ValidationError(
+                        f"Invalid URL format: {url}. Must include a protocol scheme (e.g., http://, https://, file://) or be a valid file path."
+                    )
             doc.url = url
 
         if summary is not None:

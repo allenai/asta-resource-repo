@@ -375,9 +375,18 @@ async def cmd_show(args: argparse.Namespace):
 # ============================================================================
 
 
-def get_cache_dir() -> Path:
-    """Get the cache directory path."""
-    return Path(".asta/documents/cache")
+def get_cache_dir(index_path: Path) -> Path:
+    """Get the cache directory path based on index location.
+
+    Args:
+        index_path: Path to the index file
+
+    Returns:
+        Path to cache directory (sibling to index file)
+    """
+    # Cache directory is a sibling to the index file
+    # e.g., if index is at /path/to/index.yaml, cache is at /path/to/.cache/
+    return index_path.parent / ".cache"
 
 
 def compute_url_hash(url: str) -> str:
@@ -403,7 +412,8 @@ def format_size(size_bytes: int) -> str:
 
 async def cmd_cache_list(args: argparse.Namespace):
     """List all items in the cache."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -466,7 +476,8 @@ async def cmd_cache_list(args: argparse.Namespace):
 
 async def cmd_cache_stats(args: argparse.Namespace):
     """Show cache statistics."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -550,7 +561,8 @@ async def cmd_cache_stats(args: argparse.Namespace):
 
 async def cmd_cache_clean(args: argparse.Namespace):
     """Remove cache items older than max_age_days."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -598,7 +610,8 @@ async def cmd_cache_clean(args: argparse.Namespace):
 
 async def cmd_cache_clear(args: argparse.Namespace):
     """Remove all cache items."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -620,7 +633,8 @@ async def cmd_cache_clear(args: argparse.Namespace):
 
 async def cmd_cache_info(args: argparse.Namespace):
     """Show detailed information for a specific cached item."""
-    cache_dir = get_cache_dir() / args.hash
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path)) / args.hash
 
     if not cache_dir.exists():
         print(f"Cache item not found: {args.hash}", file=sys.stderr)
@@ -738,7 +752,7 @@ async def cmd_fetch(args: argparse.Namespace):
 
         # Check cache
         url_hash = compute_url_hash(url)
-        cache_dir = get_cache_dir() / url_hash
+        cache_dir = get_cache_dir(Path(config.index_path)) / url_hash
         content_file = cache_dir / "content"
         metadata_file = cache_dir / "metadata.yaml"
 

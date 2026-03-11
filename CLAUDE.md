@@ -70,12 +70,85 @@ The Asta Resource Repository is a lightweight, git-friendly document metadata in
     - Embedding model configuration
     - Hybrid search weights
 
+9. **`utils/path_utils.py`**: Path normalization utilities
+   - Automatic conversion of file:// URLs to relative paths
+   - Detects files within repository vs. external files
+   - Improves portability across different machines
+
+### Relative Path Conversion
+
+The system automatically converts file paths to relative paths when documents are stored within the repository (parent directory of `.asta/`). This makes the index portable across different machines and git-friendly.
+
+**How it works:**
+- When adding a document with a `file://` URL or absolute path
+- If the file is within the repository (subdirectory of repo root)
+- The path is converted to a relative path (e.g., `docs/paper.pdf`)
+- If the file is outside the repository, it's stored as `file://` URL
+- HTTP/HTTPS/S3/GCS URLs are never modified
+
+**Example:**
+```python
+# Adding a document within repo
+doc = DocumentMetadata(
+    name="Research Paper",
+    url="file:///path/to/repo/docs/paper.pdf",  # Input: absolute file:// URL
+    summary="Important research",
+    mime_type="application/pdf"
+)
+await store.store(doc)
+# Stored as: url="docs/paper.pdf"  (relative path)
+
+# Adding a document outside repo
+doc2 = DocumentMetadata(
+    name="External Paper",
+    url="file:///home/user/documents/paper.pdf",  # Outside repo
+    summary="External document",
+    mime_type="application/pdf"
+)
+await store.store(doc2)
+# Stored as: url="file:///home/user/documents/paper.pdf"  (absolute file:// URL)
+```
+
+**Benefits:**
+- ✅ **Portable**: Works across different machines (absolute paths would break)
+- ✅ **Git-friendly**: Relative paths show meaningful diffs
+- ✅ **Automatic**: No manual path conversion needed
+- ✅ **Smart**: External files still use absolute file:// URLs
+
+**Implementation:**
+- `normalize_file_url()` in `utils/path_utils.py` handles the conversion
+- Called automatically in `LocalIndexDocumentStore.store()` and `update()` methods
+- Validates that relative paths have file extensions or path separators
+
+**Repository Root Detection:**
+- Standard setup: Looks for `.asta` directory in index path, uses its parent as repo root
+- Custom index path: If `.asta` not found, uses parent directory of index file as repo root
+- This ensures `--index-path` flag works correctly even with non-standard locations
+
+**Examples with custom index:**
+```bash
+# Standard .asta structure
+asta-documents add /path/to/repo/docs/paper.pdf --name="Paper" --summary="..."
+# Stored as: docs/paper.pdf (relative to repo root)
+
+# Custom index path
+asta-documents --index-path=/path/to/repo/my-index.yaml add /path/to/repo/docs/paper.pdf --name="Paper" --summary="..."
+# Stored as: docs/paper.pdf (relative to index location)
+
+# Custom index outside repo
+asta-documents --index-path=/tmp/index.yaml add /tmp/docs/paper.pdf --name="Paper" --summary="..."
+# Stored as: docs/paper.pdf (relative to /tmp)
+```
+
 ## Document Model
 
 ### DocumentMetadata Fields
 
 **Required fields:**
-- `url`: Where the actual document content lives (supported protocols: `http://`, `https://`, `file://`, `s3://`, `gs://`)
+- `url`: Where the actual document content lives
+  - Supported protocols: `http://`, `https://`, `file://`, `s3://`, `gs://`
+  - Relative paths: For files within repo (e.g., `docs/paper.pdf`)
+  - Automatically converted from absolute paths/file:// URLs when within repo
 - `name`: Document title/name
 - `summary`: Text description for search (required for all documents)
 - `mime_type`: Document MIME type (e.g., `application/pdf`, `text/plain`)
@@ -99,7 +172,7 @@ version: "1.0"
 documents:
   - uuid: "6MNxGbWGRC"  # 10-char alphanumeric short ID (72% smaller than 36-char UUID)
     name: "Attention Is All You Need"
-    url: "https://arxiv.org/pdf/1706.03762.pdf"
+    url: "https://arxiv.org/pdf/1706.03762.pdf"  # HTTP URL
     summary: "Seminal paper introducing the Transformer architecture"
     tags: ["ai", "research", "transformers", "nlp"]
     mime_type: "application/pdf"
@@ -109,12 +182,22 @@ documents:
       author: "Vaswani et al"
       year: 2017
       venue: "NeurIPS"
+
+  - uuid: "7NAbCxYzPQ"
+    name: "Local Research Notes"
+    url: "docs/research/notes.pdf"  # Relative path for file within repo
+    summary: "Research notes and findings"
+    tags: ["research", "notes"]
+    mime_type: "application/pdf"
+    created_at: "2026-03-11T10:00:00+00:00"
+    modified_at: "2026-03-11T10:00:00+00:00"
 ```
 
 **Storage format notes:**
 - Documents are identified solely by their `uuid` field
 - No namespace or URI concepts - just simple 10-character IDs
 - Clean YAML format with minimal overhead
+- URLs can be HTTP/HTTPS, relative paths (within repo), or file:// URLs (external files)
 
 ### Short ID Implementation
 
@@ -224,7 +307,7 @@ The search system provides multiple strategies optimized for different use cases
 ```
 YAML Index (Source of Truth)
     ↓ (on modification)
-SQLite Cache (.asta/documents/search.db)
+SQLite Cache (.cache/search.db)
     ├─→ FTS5 Full-Text Index (keyword search)
     ├─→ BM25 Scoring Tables (term frequencies)
     └─→ Embeddings Table (semantic vectors)
@@ -239,10 +322,14 @@ Search Query
 
 **File Structure:**
 ```
-.asta/
-├── index.yaml          # Source of truth (git-tracked)
-├── search.db           # SQLite cache (gitignored)
-└── .index_checksum     # YAML modification tracker (gitignored)
+/path/to/index/
+├── index.yaml              # Source of truth (can be git-tracked)
+└── .cache/                 # Cache directory (gitignored)
+    ├── search.db           # SQLite search cache
+    ├── .index_checksum     # YAML modification tracker
+    └── <hash>/             # Fetched document content
+        ├── content
+        └── metadata.yaml
 ```
 
 ### Field-Specific Search
@@ -603,7 +690,7 @@ except Exception:
 
 **Changing embedding model**:
 1. Update `model` in `local.conf`
-2. Delete `.asta/documents/search.db` to clear old embeddings
+2. Delete `.cache/search.db` (or entire `.cache/` directory) to clear old embeddings
 3. Run search to regenerate with new model
 
 ## Configuration
@@ -746,7 +833,7 @@ The CLI includes built-in content fetching with automatic caching:
 - 7-day default cache freshness (configurable with `--max-age`)
 - Downloads and caches content on first request
 - Instant retrieval from cache on subsequent requests
-- Cache stored in `.asta/documents/cache/` (gitignored)
+- Cache stored in `.cache/` directory (gitignored)
 
 **Workflow for reading document content:**
 
@@ -933,7 +1020,7 @@ asta-documents cache info <hash>
 
 **How it works:**
 1. `asta-documents fetch` retrieves document metadata from Asta index
-2. Checks local cache (`.asta/documents/cache/`) using SHA256 hash of URL
+2. Checks local cache (`.cache/` directory) using SHA256 hash of URL
 3. Uses cached content if fresh (< max-age days)
 4. Downloads and caches if not present or expired
 5. Saves to specified output file
