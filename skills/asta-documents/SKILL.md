@@ -99,7 +99,7 @@ When you encounter an `asta://` URL, follow these steps:
 1. **Parse the URL** to extract the encoded index URL and document UUID
 2. **URL-decode** the index URL
 3. **Download the remote index** to a local temporary file
-4. **Access documents** using the `--index-path` parameter
+4. **Access documents** using the `--root` parameter
 
 **Example:**
 
@@ -115,13 +115,14 @@ UUID=$(echo "$ASTA_URL" | sed 's|.*/||')
 INDEX_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$ENCODED_INDEX_URL'))")
 
 # 3. Download the remote index
-curl -s -o /tmp/remote-index.yaml "$INDEX_URL"
+mkdir -p /tmp/asta-remote
+curl -s -o /tmp/asta-remote/index.yaml "$INDEX_URL"
 
-# 4. Get document metadata using --index-path
-asta-documents get "$UUID" --index-path /tmp/remote-index.yaml
+# 4. Get document metadata using --root
+asta-documents get "$UUID" --root /tmp/asta-remote
 
 # 5. Fetch document content
-asta-documents fetch "$UUID" --index-path /tmp/remote-index.yaml -o /tmp/document.pdf
+asta-documents fetch "$UUID" --root /tmp/asta-remote -o /tmp/document.pdf
 ```
 
 **Common Operations with Remote Indexes:**
@@ -131,22 +132,23 @@ asta-documents fetch "$UUID" --index-path /tmp/remote-index.yaml -o /tmp/documen
 # Assume TEMP_INDEX points to the downloaded index file
 
 # Search remote index
-asta-documents search --summary="query" --index-path "$TEMP_INDEX"
+asta-documents search --summary="query" --root "$TEMP_ROOT"
 
 # List all documents in remote index
-asta-documents list --index-path "$TEMP_INDEX"
+asta-documents list --root "$TEMP_ROOT"
 
 # Get metadata for specific document
-asta-documents get "$UUID" --index-path "$TEMP_INDEX"
+asta-documents get "$UUID" --root "$TEMP_ROOT"
 
 # Search and fetch from remote index
-asta-documents search --summary="transformers" --index-path "$TEMP_INDEX" --show-scores
-asta-documents fetch "$UUID" --index-path "$TEMP_INDEX" -o result.pdf
+asta-documents search --summary="transformers" --root "$TEMP_ROOT" --show-scores
+asta-documents fetch "$UUID" --root "$TEMP_ROOT" -o result.pdf
 ```
 
 **Important Notes:**
 
-- The `--index-path` parameter works with all read commands (list, search, get, fetch)
+- The `--root` parameter works with all read commands (list, search, get, fetch)
+- The root directory must contain an `index.yaml` file
 - Remote indexes accessed this way are read-only (no add/update/remove operations)
 - Downloaded indexes can be cached locally to avoid repeated downloads
 - The index URL portion is URL-encoded and must be decoded before use
@@ -168,18 +170,19 @@ INDEX_URL=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$ENCODE
 # Result: https://ai.example.org/papers/index.yaml
 
 # Step 3: Download index to temp location
-TEMP_INDEX="/tmp/asta-index-$(date +%s).yaml"
-curl -s -o "$TEMP_INDEX" "$INDEX_URL"
+TEMP_ROOT="/tmp/asta-remote-$(date +%s)"
+mkdir -p "$TEMP_ROOT"
+curl -s -o "$TEMP_ROOT/index.yaml" "$INDEX_URL"
 
 # Step 4: Verify download succeeded
-if [ ! -f "$TEMP_INDEX" ]; then
+if [ ! -f "$TEMP_ROOT/index.yaml" ]; then
     echo "Failed to download index from $INDEX_URL"
     exit 1
 fi
 
 # Step 5: Access the document
-asta-documents get "$UUID" --index-path "$TEMP_INDEX"
-asta-documents fetch "$UUID" --index-path "$TEMP_INDEX" -o /tmp/paper.pdf
+asta-documents get "$UUID" --root "$TEMP_ROOT"
+asta-documents fetch "$UUID" --root "$TEMP_ROOT" -o /tmp/paper.pdf
 
 # Step 6: Read the content
 # Read(/tmp/paper.pdf)

@@ -904,8 +904,8 @@ Examples:
         help="Output in JSON format (can appear anywhere in command)",
     )
     parser.add_argument(
-        "--index-path",
-        help="Override index file path (default: from config)",
+        "--root",
+        help="Root directory containing index.yaml (default: .asta/documents)",
     )
 
     # Subcommands
@@ -1164,8 +1164,11 @@ Examples:
 
     # Build config overrides from command-line arguments
     config_overrides = {}
-    if hasattr(args, "index_path") and args.index_path:
-        config_overrides["index_path"] = args.index_path
+    if hasattr(args, "root") and args.root:
+        # Convert root directory to full index path
+        root_path = Path(args.root)
+        index_path = root_path / "index.yaml"
+        config_overrides["index_path"] = str(index_path)
 
     # Attach overrides to args so commands can access them
     args.config_overrides = config_overrides if config_overrides else None

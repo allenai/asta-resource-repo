@@ -123,21 +123,24 @@ await store.store(doc2)
 **Repository Root Detection:**
 - Standard setup: Looks for `.asta` directory in index path, uses its parent as repo root
 - Custom index path: If `.asta` not found, uses parent directory of index file as repo root
-- This ensures `--index-path` flag works correctly even with non-standard locations
+- This ensures `--root` flag works correctly with any directory structure
 
-**Examples with custom index:**
+**Examples with custom root:**
 ```bash
-# Standard .asta structure
+# Standard .asta structure (default root: .asta/documents)
 asta-documents add /path/to/repo/docs/paper.pdf --name="Paper" --summary="..."
-# Stored as: docs/paper.pdf (relative to repo root)
+# Index file: .asta/documents/index.yaml
+# Stored as: docs/paper.pdf (relative to .asta/documents/)
 
-# Custom index path
-asta-documents --index-path=/path/to/repo/my-index.yaml add /path/to/repo/docs/paper.pdf --name="Paper" --summary="..."
-# Stored as: docs/paper.pdf (relative to index location)
+# Custom root directory
+asta-documents --root=/path/to/repo/metadata add /path/to/repo/metadata/docs/paper.pdf --name="Paper" --summary="..."
+# Index file: /path/to/repo/metadata/index.yaml
+# Stored as: docs/paper.pdf (relative to /path/to/repo/metadata/)
 
-# Custom index outside repo
-asta-documents --index-path=/tmp/index.yaml add /tmp/docs/paper.pdf --name="Paper" --summary="..."
-# Stored as: docs/paper.pdf (relative to /tmp)
+# Root in different location
+asta-documents --root=/tmp/my-project add /tmp/my-project/docs/paper.pdf --name="Paper" --summary="..."
+# Index file: /tmp/my-project/index.yaml
+# Stored as: docs/paper.pdf (relative to /tmp/my-project/)
 ```
 
 ## Document Model
