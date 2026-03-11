@@ -1077,7 +1077,8 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Check if document exists
         if uuid not in self._documents:
-            raise ValidationError(f"Document not found: {uuid}")
+            root_dir = Path(self.index_path).parent
+            raise ValidationError(f"Document not found: {uuid} (searched in {root_dir})")
 
         # Get existing document
         doc = self._documents[uuid]
@@ -1158,7 +1159,8 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Check if document exists
         if uuid not in self._documents:
-            raise ValidationError(f"Document not found: {uuid}")
+            root_dir = Path(self.index_path).parent
+            raise ValidationError(f"Document not found: {uuid} (searched in {root_dir})")
 
         # Get existing document
         doc = self._documents[uuid]
@@ -1194,7 +1196,8 @@ class LocalIndexDocumentStore(DocumentStore):
 
         # Check if document exists
         if uuid not in self._documents:
-            raise ValidationError(f"Document not found: {uuid}")
+            root_dir = Path(self.index_path).parent
+            raise ValidationError(f"Document not found: {uuid} (searched in {root_dir})")
 
         # Get existing document
         doc = self._documents[uuid]

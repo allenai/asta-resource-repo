@@ -124,13 +124,14 @@ async def cmd_get(args: argparse.Namespace):
     """Get a document by UUID"""
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     try:
         async with store:
             doc = await store.get(args.uuid)
 
             if doc is None:
-                print(f"Document not found: {args.uuid}", file=sys.stderr)
+                print(f"Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
                 sys.exit(1)
 
             if args.json:
@@ -261,6 +262,7 @@ async def cmd_remove(args: argparse.Namespace):
     """Remove a document by UUID"""
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     try:
         async with store:
@@ -275,7 +277,7 @@ async def cmd_remove(args: argparse.Namespace):
                 if args.json:
                     print(json.dumps({"status": "not_found", "uuid": args.uuid}))
                 else:
-                    print(f"Document not found: {args.uuid}", file=sys.stderr)
+                    print(f"Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
                     sys.exit(1)
 
     except (ValidationError, DocumentServiceError) as e:
@@ -739,12 +741,13 @@ async def cmd_fetch(args: argparse.Namespace):
     # Get document metadata
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     async with store:
         doc = await store.get(args.uuid)
 
         if doc is None:
-            print(f"Error: Document not found: {args.uuid}", file=sys.stderr)
+            print(f"Error: Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
             sys.exit(1)
 
         url = doc.url
@@ -753,8 +756,7 @@ async def cmd_fetch(args: argparse.Namespace):
         # Convert relative paths to absolute file:// URLs
         if "://" not in url:
             # This is a relative path - resolve it relative to index parent directory
-            index_path = Path(config.index_path)
-            repo_root = index_path.parent
+            repo_root = root_dir
             absolute_path = (repo_root / url).resolve()
             url = f"file://{absolute_path.as_posix()}"
 
