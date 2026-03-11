@@ -750,6 +750,14 @@ async def cmd_fetch(args: argparse.Namespace):
         url = doc.url
         mime_type = doc.mime_type
 
+        # Convert relative paths to absolute file:// URLs
+        if "://" not in url:
+            # This is a relative path - resolve it relative to index parent directory
+            index_path = Path(config.index_path)
+            repo_root = index_path.parent
+            absolute_path = (repo_root / url).resolve()
+            url = f"file://{absolute_path.as_posix()}"
+
         # Check cache
         url_hash = compute_url_hash(url)
         cache_dir = get_cache_dir(Path(config.index_path)) / url_hash

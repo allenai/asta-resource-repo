@@ -1,6 +1,6 @@
 # Makefile for asta-resource-repo
 
-.PHONY: code-check code-format test verify set-version push-version-tag
+.PHONY: code-check code-format test test-fast test-search verify set-version push-version-tag
 
 # Check code formatting and linting
 code-check:
@@ -14,6 +14,14 @@ code-format:
 # Run all tests
 test:
 	uv run --extra dev pytest tests/ -v
+
+# Run fast tests only (excludes slow search tests)
+test-fast:
+	uv run --extra dev pytest tests/ -v -k "not (search or fts5 or multi_field or bm25)"
+
+# Run search-related tests only (slow)
+test-search:
+	uv run --extra dev pytest tests/ -v -k "search or fts5 or multi_field or bm25"
 
 # Verify code quality and tests
 verify: code-check test
