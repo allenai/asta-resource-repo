@@ -62,7 +62,9 @@ async def test_file_protocol_url_validation(store, temp_file):
     # Verify stored correctly
     retrieved = await store.get(uuid)
     assert retrieved is not None
-    assert retrieved.url == f"file://{temp_file}"
+    # URL may be normalized to canonical path (e.g., /var -> /private/var on macOS)
+    assert retrieved.url.startswith("file://")
+    assert Path(temp_file).name in retrieved.url
     assert retrieved.mime_type == "text/plain"
 
 
@@ -120,7 +122,10 @@ async def test_file_protocol_with_spaces_in_path(store):
 
         retrieved = await store.get(uuid)
         assert retrieved is not None
-        assert retrieved.url == f"file://{test_file}"
+        # URL may be normalized to canonical path (e.g., /var -> /private/var on macOS)
+        assert retrieved.url.startswith("file://")
+        assert "test folder with spaces" in retrieved.url
+        assert "test document.txt" in retrieved.url
 
 
 @pytest.mark.asyncio
@@ -268,3 +273,89 @@ def test_fetch_content_by_protocol_no_protocol():
         fetch_content_by_protocol("example.com/doc.pdf")
 
     assert "Unsupported protocol" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fetch_relative_path_document(store, temp_file):
+    """Test fetching a document stored with a relative path."""
+    # Create a temp file in the index's parent directory
+    index_dir = Path(store.index_path).parent
+    test_file = index_dir / "test_doc.txt"
+    test_file.write_text("Test content for relative path")
+
+    try:
+        # Store document with relative path (simulating what normalize_file_url does)
+        doc = DocumentMetadata(
+            uuid="",
+            name="Test Relative Path Document",
+            url="test_doc.txt",  # Relative path, no protocol
+            summary="Document with relative path URL",
+            mime_type="text/plain",
+        )
+
+        uuid = await store.store(doc)
+
+        # Verify document is stored with relative path
+        retrieved = await store.get(uuid)
+        assert retrieved is not None
+        assert retrieved.url == "test_doc.txt"  # Should stay as relative path
+
+    finally:
+        # Cleanup
+        test_file.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
+async def test_cmd_fetch_with_relative_path(temp_index_path):
+    """Test the full cmd_fetch workflow with a relative path URL."""
+    import argparse
+
+    from asta.resources.cli.index_cli import cmd_fetch
+
+    # Setup: Create index directory and a test file
+    index_dir = temp_index_path.parent
+    index_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a test file in the repo root (index parent)
+    test_file = index_dir / "test_document.pdf"
+    test_content = b"PDF test content for relative path"
+    test_file.write_bytes(test_content)
+
+    # Output file for fetch
+    output_file = index_dir / "fetched_output.pdf"
+
+    try:
+        # Create a document with relative path
+        store = LocalIndexDocumentStore(index_path=str(temp_index_path))
+        async with store:
+            doc = DocumentMetadata(
+                uuid="",
+                name="Test PDF",
+                url="test_document.pdf",  # Relative path
+                summary="Test document",
+                mime_type="application/pdf",
+            )
+            uuid = await store.store(doc)
+
+        # Mock cmd_fetch arguments to write to file
+        args = argparse.Namespace(
+            uuid=uuid,
+            output=str(output_file),
+            force=False,
+            max_age=7,
+            quiet=True,
+            config_overrides={"index_path": str(temp_index_path)},
+        )
+
+        # Run fetch command
+        await cmd_fetch(args)
+
+        # Verify content was fetched correctly
+        assert output_file.exists()
+        fetched_content = output_file.read_bytes()
+        assert fetched_content == test_content
+
+    finally:
+        # Cleanup
+        test_file.unlink(missing_ok=True)
+        output_file.unlink(missing_ok=True)

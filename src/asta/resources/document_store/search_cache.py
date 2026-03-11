@@ -26,7 +26,9 @@ class SearchCache:
             cache_filename: Name of SQLite cache file (default: "search.db")
         """
         self.index_path = index_path
-        self.cache_path = index_path.parent / cache_filename
+        # Store cache in .cache directory alongside index file
+        cache_dir = index_path.parent / ".cache"
+        self.cache_path = cache_dir / cache_filename
         self.conn: Optional[sqlite3.Connection] = None
         self._initialized = False
 

@@ -124,13 +124,17 @@ async def cmd_get(args: argparse.Namespace):
     """Get a document by UUID"""
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     try:
         async with store:
             doc = await store.get(args.uuid)
 
             if doc is None:
-                print(f"Document not found: {args.uuid}", file=sys.stderr)
+                print(
+                    f"Document not found: {args.uuid} (searched in {root_dir})",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
             if args.json:
@@ -261,6 +265,7 @@ async def cmd_remove(args: argparse.Namespace):
     """Remove a document by UUID"""
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     try:
         async with store:
@@ -275,7 +280,10 @@ async def cmd_remove(args: argparse.Namespace):
                 if args.json:
                     print(json.dumps({"status": "not_found", "uuid": args.uuid}))
                 else:
-                    print(f"Document not found: {args.uuid}", file=sys.stderr)
+                    print(
+                        f"Document not found: {args.uuid} (searched in {root_dir})",
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
 
     except (ValidationError, DocumentServiceError) as e:
@@ -375,9 +383,18 @@ async def cmd_show(args: argparse.Namespace):
 # ============================================================================
 
 
-def get_cache_dir() -> Path:
-    """Get the cache directory path."""
-    return Path(".asta/documents/cache")
+def get_cache_dir(index_path: Path) -> Path:
+    """Get the cache directory path based on index location.
+
+    Args:
+        index_path: Path to the index file
+
+    Returns:
+        Path to cache directory (sibling to index file)
+    """
+    # Cache directory is a sibling to the index file
+    # e.g., if index is at /path/to/index.yaml, cache is at /path/to/.cache/
+    return index_path.parent / ".cache"
 
 
 def compute_url_hash(url: str) -> str:
@@ -403,7 +420,8 @@ def format_size(size_bytes: int) -> str:
 
 async def cmd_cache_list(args: argparse.Namespace):
     """List all items in the cache."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -466,7 +484,8 @@ async def cmd_cache_list(args: argparse.Namespace):
 
 async def cmd_cache_stats(args: argparse.Namespace):
     """Show cache statistics."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -550,7 +569,8 @@ async def cmd_cache_stats(args: argparse.Namespace):
 
 async def cmd_cache_clean(args: argparse.Namespace):
     """Remove cache items older than max_age_days."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -598,7 +618,8 @@ async def cmd_cache_clean(args: argparse.Namespace):
 
 async def cmd_cache_clear(args: argparse.Namespace):
     """Remove all cache items."""
-    cache_dir = get_cache_dir()
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path))
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -620,7 +641,8 @@ async def cmd_cache_clear(args: argparse.Namespace):
 
 async def cmd_cache_info(args: argparse.Namespace):
     """Show detailed information for a specific cached item."""
-    cache_dir = get_cache_dir() / args.hash
+    config = load_config(overrides=getattr(args, "config_overrides", None))
+    cache_dir = get_cache_dir(Path(config.index_path)) / args.hash
 
     if not cache_dir.exists():
         print(f"Cache item not found: {args.hash}", file=sys.stderr)
@@ -725,20 +747,31 @@ async def cmd_fetch(args: argparse.Namespace):
     # Get document metadata
     config = load_config(overrides=getattr(args, "config_overrides", None))
     store = LocalIndexDocumentStore.from_config(config)
+    root_dir = Path(config.index_path).parent
 
     async with store:
         doc = await store.get(args.uuid)
 
         if doc is None:
-            print(f"Error: Document not found: {args.uuid}", file=sys.stderr)
+            print(
+                f"Error: Document not found: {args.uuid} (searched in {root_dir})",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         url = doc.url
         mime_type = doc.mime_type
 
+        # Convert relative paths to absolute file:// URLs
+        if "://" not in url:
+            # This is a relative path - resolve it relative to index parent directory
+            repo_root = root_dir
+            absolute_path = (repo_root / url).resolve()
+            url = f"file://{absolute_path.as_posix()}"
+
         # Check cache
         url_hash = compute_url_hash(url)
-        cache_dir = get_cache_dir() / url_hash
+        cache_dir = get_cache_dir(Path(config.index_path)) / url_hash
         content_file = cache_dir / "content"
         metadata_file = cache_dir / "metadata.yaml"
 
@@ -890,8 +923,8 @@ Examples:
         help="Output in JSON format (can appear anywhere in command)",
     )
     parser.add_argument(
-        "--index-path",
-        help="Override index file path (default: from config)",
+        "--root",
+        help="Root directory containing index.yaml (default: .asta/documents)",
     )
 
     # Subcommands
@@ -1150,8 +1183,11 @@ Examples:
 
     # Build config overrides from command-line arguments
     config_overrides = {}
-    if hasattr(args, "index_path") and args.index_path:
-        config_overrides["index_path"] = args.index_path
+    if hasattr(args, "root") and args.root:
+        # Convert root directory to full index path
+        root_path = Path(args.root)
+        index_path = root_path / "index.yaml"
+        config_overrides["index_path"] = str(index_path)
 
     # Attach overrides to args so commands can access them
     args.config_overrides = config_overrides if config_overrides else None
