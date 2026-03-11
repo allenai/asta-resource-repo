@@ -47,7 +47,7 @@ push-version-tag:
 		exit 1; \
 	fi; \
 	echo "Version $$INIT_VERSION verified in both files"; \
-	echo "Creating and pushing git tag: $$INIT_VERSION"; \
-	git tag v$$INIT_VERSION; \
-	git push origin v$$INIT_VERSION; \
+	echo "Creating and pushing git tag: v$$INIT_VERSION"; \
+	git tag v$$INIT_VERSION && \
+	git push origin v$$INIT_VERSION && \
 	echo "Successfully pushed tag v$$INIT_VERSION"
