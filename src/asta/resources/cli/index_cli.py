@@ -131,7 +131,10 @@ async def cmd_get(args: argparse.Namespace):
             doc = await store.get(args.uuid)
 
             if doc is None:
-                print(f"Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
+                print(
+                    f"Document not found: {args.uuid} (searched in {root_dir})",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
 
             if args.json:
@@ -277,7 +280,10 @@ async def cmd_remove(args: argparse.Namespace):
                 if args.json:
                     print(json.dumps({"status": "not_found", "uuid": args.uuid}))
                 else:
-                    print(f"Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
+                    print(
+                        f"Document not found: {args.uuid} (searched in {root_dir})",
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
 
     except (ValidationError, DocumentServiceError) as e:
@@ -747,7 +753,10 @@ async def cmd_fetch(args: argparse.Namespace):
         doc = await store.get(args.uuid)
 
         if doc is None:
-            print(f"Error: Document not found: {args.uuid} (searched in {root_dir})", file=sys.stderr)
+            print(
+                f"Error: Document not found: {args.uuid} (searched in {root_dir})",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         url = doc.url
