@@ -838,6 +838,100 @@ async def cmd_fetch(args: argparse.Namespace):
             sys.stdout.buffer.write(content)
 
 
+async def cmd_export(args: argparse.Namespace):
+    """Export documents to paperstore format"""
+    from ..export.ocr import MistralOCRStore
+    from ..export.s2_client import S2Client
+    from ..export.paperstore import PaperstoreExporter
+
+    quiet = getattr(args, "quiet", False)
+
+    # Determine input documents
+    documents = []
+    use_index = getattr(args, "all", False) or getattr(args, "tags", None)
+
+    if use_index:
+        # Read from the index
+        config = load_config(overrides=getattr(args, "config_overrides", None))
+        store = LocalIndexDocumentStore.from_config(config)
+        async with store:
+            all_docs = await store.list_docs()
+
+            if getattr(args, "tags", None):
+                filter_tags = set(args.tags.split(","))
+                all_docs = [
+                    doc
+                    for doc in all_docs
+                    if doc.tags and any(t in filter_tags for t in doc.tags)
+                ]
+
+            documents = all_docs
+    elif not sys.stdin.isatty():
+        # Reading from stdin (piped input)
+        try:
+            raw = json.loads(sys.stdin.read())
+            # Handle multiple JSON formats:
+            # - list of DocumentMetadata dicts (from `list --json`)
+            # - list of SearchHit dicts with "result" key (from `search --json`)
+            # - dict with "hits" key containing SearchHit list
+            if isinstance(raw, dict) and "hits" in raw:
+                raw = [h["result"] for h in raw["hits"]]
+            if not isinstance(raw, list):
+                print("Error: unrecognized JSON input format", file=sys.stderr)
+                sys.exit(1)
+            for item in raw:
+                # Unwrap SearchHit format if present
+                if isinstance(item, dict) and "result" in item and "score" in item:
+                    item = item["result"]
+                documents.append(DocumentMetadata(**item))
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Error reading stdin: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(
+            "Error: provide input via stdin pipe, or use --all or --tags",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not documents:
+        print("No documents to export.", file=sys.stderr)
+        sys.exit(0)
+
+    if not quiet:
+        print(f"Exporting {len(documents)} document(s)...", file=sys.stderr)
+
+    # Initialize exporters
+    try:
+        ocr = MistralOCRStore()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    s2 = S2Client()
+    exporter = PaperstoreExporter(ocr=ocr, s2=s2)
+
+    result = exporter.export(
+        documents,
+        max_pages=getattr(args, "max_pages", 20),
+        quiet=quiet,
+    )
+
+    output_str = json.dumps(result, indent=2, default=str)
+
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(output_str)
+        if not quiet:
+            n = len(result.get("paperstore", {}))
+            print(
+                f"Exported {n} paper(s) to {args.output}",
+                file=sys.stderr,
+            )
+    else:
+        print(output_str)
+
+
 def main():
     """Main entry point for asta-documents CLI"""
     # Create a parent parser with shared arguments for subcommands
@@ -1161,6 +1255,45 @@ Examples:
     )
     cache_info_parser.add_argument("hash", help="Cache hash (directory name)")
     cache_info_parser.set_defaults(func=cmd_cache_info)
+
+    # export command
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export documents to external formats (e.g. Theorizer paperstore)",
+    )
+    export_parser.add_argument(
+        "--format",
+        choices=["paperstore"],
+        required=True,
+        help="Export format",
+    )
+    export_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Export all documents in the index",
+    )
+    export_parser.add_argument(
+        "--tags",
+        help="Export documents matching tags (comma-separated)",
+    )
+    export_parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=20,
+        help="Maximum PDF pages to OCR (default: 20)",
+    )
+    export_parser.add_argument(
+        "-o",
+        "--output",
+        help="Output file (default: stdout)",
+    )
+    export_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress progress messages",
+    )
+    export_parser.set_defaults(func=cmd_export)
 
     # Parse arguments
     args = parser.parse_args()
