@@ -839,60 +839,13 @@ async def cmd_fetch(args: argparse.Namespace):
 
 
 async def cmd_export(args: argparse.Namespace):
-    """Export documents to paperstore format"""
+    """Export documents to paperstore format."""
     from ..export.ocr import MistralOCRStore
     from ..export.s2_client import S2Client
     from ..export.paperstore import PaperstoreExporter
 
     quiet = getattr(args, "quiet", False)
-
-    # Determine input documents
-    documents = []
-    use_index = getattr(args, "all", False) or getattr(args, "tags", None)
-
-    if use_index:
-        # Read from the index
-        config = load_config(overrides=getattr(args, "config_overrides", None))
-        store = LocalIndexDocumentStore.from_config(config)
-        async with store:
-            all_docs = await store.list_docs()
-
-            if getattr(args, "tags", None):
-                filter_tags = set(args.tags.split(","))
-                all_docs = [
-                    doc
-                    for doc in all_docs
-                    if doc.tags and any(t in filter_tags for t in doc.tags)
-                ]
-
-            documents = all_docs
-    elif not sys.stdin.isatty():
-        # Reading from stdin (piped input)
-        try:
-            raw = json.loads(sys.stdin.read())
-            # Handle multiple JSON formats:
-            # - list of DocumentMetadata dicts (from `list --json`)
-            # - list of SearchHit dicts with "result" key (from `search --json`)
-            # - dict with "hits" key containing SearchHit list
-            if isinstance(raw, dict) and "hits" in raw:
-                raw = [h["result"] for h in raw["hits"]]
-            if not isinstance(raw, list):
-                print("Error: unrecognized JSON input format", file=sys.stderr)
-                sys.exit(1)
-            for item in raw:
-                # Unwrap SearchHit format if present
-                if isinstance(item, dict) and "result" in item and "score" in item:
-                    item = item["result"]
-                documents.append(DocumentMetadata(**item))
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"Error reading stdin: {e}", file=sys.stderr)
-            sys.exit(1)
-    else:
-        print(
-            "Error: provide input via stdin pipe, or use --all or --tags",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    documents = await _load_export_documents(args)
 
     if not documents:
         print("No documents to export.", file=sys.stderr)
@@ -901,35 +854,74 @@ async def cmd_export(args: argparse.Namespace):
     if not quiet:
         print(f"Exporting {len(documents)} document(s)...", file=sys.stderr)
 
-    # Initialize exporters
     try:
         ocr = MistralOCRStore()
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    s2 = S2Client()
-    exporter = PaperstoreExporter(ocr=ocr, s2=s2)
-
+    exporter = PaperstoreExporter(ocr=ocr, s2=S2Client())
     result = exporter.export(
         documents,
         max_pages=getattr(args, "max_pages", 20),
         quiet=quiet,
     )
 
-    output_str = json.dumps(result, indent=2, default=str)
-
+    output_json = json.dumps(result, indent=2, default=str)
     if args.output:
         with open(args.output, "w") as f:
-            f.write(output_str)
+            f.write(output_json)
         if not quiet:
-            n = len(result.get("paperstore", {}))
-            print(
-                f"Exported {n} paper(s) to {args.output}",
-                file=sys.stderr,
-            )
+            paper_count = len(result.get("paperstore", {}))
+            print(f"Exported {paper_count} paper(s) to {args.output}", file=sys.stderr)
     else:
-        print(output_str)
+        print(output_json)
+
+
+async def _load_export_documents(args: argparse.Namespace) -> list[DocumentMetadata]:
+    """Resolve documents from --all/--tags flags or stdin JSON."""
+    read_from_index = getattr(args, "all", False) or getattr(args, "tags", None)
+
+    if read_from_index:
+        config = load_config(overrides=getattr(args, "config_overrides", None))
+        store = LocalIndexDocumentStore.from_config(config)
+        async with store:
+            documents = await store.list_docs()
+            if getattr(args, "tags", None):
+                filter_tags = set(args.tags.split(","))
+                documents = [
+                    doc for doc in documents
+                    if doc.tags and any(t in filter_tags for t in doc.tags)
+                ]
+            return documents
+
+    if not sys.stdin.isatty():
+        return _parse_documents_from_stdin()
+
+    print("Error: provide input via stdin pipe, or use --all or --tags", file=sys.stderr)
+    sys.exit(1)
+
+
+def _parse_documents_from_stdin() -> list[DocumentMetadata]:
+    """Parse documents from stdin, handling both list and search-hit JSON formats."""
+    try:
+        raw = json.loads(sys.stdin.read())
+    except json.JSONDecodeError as e:
+        print(f"Error reading stdin: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if isinstance(raw, dict) and "hits" in raw:
+        raw = [h["result"] for h in raw["hits"]]
+    if not isinstance(raw, list):
+        print("Error: unrecognized JSON input format", file=sys.stderr)
+        sys.exit(1)
+
+    documents = []
+    for item in raw:
+        if isinstance(item, dict) and "result" in item and "score" in item:
+            item = item["result"]
+        documents.append(DocumentMetadata(**item))
+    return documents
 
 
 def main():
