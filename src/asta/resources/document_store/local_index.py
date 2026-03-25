@@ -981,18 +981,20 @@ class LocalIndexDocumentStore(DocumentStore):
         await self._embedding_manager.ensure_embeddings(self._documents)
 
         # Get BM25 results
+        # When limit is None (e.g., multi-field search), fetch all results
+        fetch_limit = limit * 2 if limit is not None else None
         bm25_ranker = BM25Ranker(
             self._search_cache.conn,
             k1=self._bm25_k1,
             b=self._bm25_b,
             field_weights=self._field_weights,
         )
-        bm25_results = bm25_ranker.rank(query, limit * 2)  # Get more for fusion
+        bm25_results = bm25_ranker.rank(query, fetch_limit)  # Get more for fusion
 
         # Get semantic results
         query_embedding = self._embedding_manager.generate_embedding(query)
         semantic_results = self._embedding_manager.vector_search(
-            query_embedding, limit * 2
+            query_embedding, fetch_limit
         )
 
         # Combine with Reciprocal Rank Fusion
