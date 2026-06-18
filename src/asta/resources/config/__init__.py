@@ -12,6 +12,7 @@ class SearchConfig(BaseModel):
 
     enable_cache: bool = True
     cache_filename: str = "search.db"
+    cache_dir: Optional[str] = None
     enable_embeddings: bool = True
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     bm25_k1: float = 1.2
@@ -33,6 +34,7 @@ class SearchConfig(BaseModel):
         return SearchConfig(
             enable_cache=config.get("enable_cache", True),
             cache_filename=config.get("cache_filename", "search.db"),
+            cache_dir=config.get("cache_dir", None),
             enable_embeddings=config.get("embeddings.enabled", True),
             embedding_model=config.get(
                 "embeddings.model", "sentence-transformers/all-MiniLM-L6-v2"

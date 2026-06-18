@@ -1,9 +1,17 @@
 """Embedding generation and vector search for semantic similarity"""
 
+import os
 import sqlite3
 import struct
 from typing import List, Tuple, Optional, TYPE_CHECKING
 import logging
+
+# Silence Hugging Face / transformers noise (LOAD REPORT, "Loading weights"
+# progress bar, advisory warnings) before any transformers import happens.
+# Users can still opt in to verbose output by setting these env vars themselves.
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
 
 if TYPE_CHECKING:
     import numpy as np
@@ -58,6 +66,18 @@ class EmbeddingManager:
             # Import heavy dependencies only when actually needed
             from sentence_transformers import SentenceTransformer
 
+            # Belt-and-suspenders silencing in case env vars were set too late
+            # (e.g. embeddings.py was imported after transformers already loaded).
+            try:
+                import transformers
+
+                transformers.logging.set_verbosity_error()
+                if hasattr(transformers.utils.logging, "disable_progress_bar"):
+                    transformers.utils.logging.disable_progress_bar()
+            except Exception:
+                pass
+            logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+
             logger.info(f"Loading embedding model: {self.model_name}")
             self._model = SentenceTransformer(self.model_name)
             # Get dimension by encoding a test string
@@ -65,16 +85,27 @@ class EmbeddingManager:
             self._dimension = len(test_embedding)
             logger.info(f"Model loaded. Dimension: {self._dimension}")
 
-            # Store model config
+            # Persist model config only if it's actually missing or changed.
+            # Writing unconditionally would touch the cache file on every
+            # query-time call to _load_model().
+            self._sync_model_config()
+
+    def _sync_model_config(self):
+        """Write model_name / dimension to embedding_config if not already current."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT key, value FROM embedding_config WHERE key IN ('model_name', 'dimension')"
+        )
+        stored = {row[0]: row[1] for row in cursor.fetchall()}
+        desired = {"model_name": self.model_name, "dimension": str(self._dimension)}
+        if stored == desired:
+            return
+        for key, value in desired.items():
             self.conn.execute(
                 "INSERT OR REPLACE INTO embedding_config (key, value) VALUES (?, ?)",
-                ("model_name", self.model_name),
+                (key, value),
             )
-            self.conn.execute(
-                "INSERT OR REPLACE INTO embedding_config (key, value) VALUES (?, ?)",
-                ("dimension", str(self._dimension)),
-            )
-            self.conn.commit()
+        self.conn.commit()
 
     def generate_embedding(self, text: str) -> "np.ndarray":
         """Generate embedding vector for text

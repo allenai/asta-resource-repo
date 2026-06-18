@@ -18,17 +18,23 @@ class SearchCache:
     Uses FTS5 for full-text search with field boosting.
     """
 
-    def __init__(self, index_path: Path, cache_filename: str = "search.db"):
+    def __init__(
+        self,
+        index_path: Path,
+        cache_filename: str = "search.db",
+        cache_dir: Optional[Path] = None,
+    ):
         """Initialize search cache
 
         Args:
             index_path: Path to YAML index file
             cache_filename: Name of SQLite cache file (default: "search.db")
+            cache_dir: Directory holding the cache file (default: ``<index_path>/.cache``)
         """
         self.index_path = index_path
-        # Store cache in .cache directory alongside index file
-        cache_dir = index_path.parent / ".cache"
-        self.cache_path = cache_dir / cache_filename
+        if cache_dir is None:
+            cache_dir = index_path.parent / ".cache"
+        self.cache_path = Path(cache_dir) / cache_filename
         self.conn: Optional[sqlite3.Connection] = None
         self._initialized = False
 
@@ -44,9 +50,26 @@ class SearchCache:
         self.conn = sqlite3.connect(str(self.cache_path))
         self.conn.row_factory = sqlite3.Row  # Enable column access by name
 
-        # Initialize schema
-        self._init_schema()
+        # Running the schema script always opens a write transaction (even when
+        # every CREATE is a no-op), so skip it when the cache is already in
+        # sync with the YAML index. This keeps read-only invocations like
+        # `search --name`/`--tags`/`--extra` from touching the cache file.
+        if not self._cache_is_current():
+            self._init_schema()
+
         self._initialized = True
+
+    def _cache_is_current(self) -> bool:
+        """Return True if schema exists and the stored YAML hash matches."""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT value FROM sync_metadata WHERE key = 'yaml_hash'")
+            row = cursor.fetchone()
+        except sqlite3.Error:
+            return False
+        if row is None:
+            return False
+        return row["value"] == self._calculate_yaml_hash()
 
     def _init_schema(self):
         """Initialize database schema from SQL file"""
