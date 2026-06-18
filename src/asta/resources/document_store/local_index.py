@@ -53,6 +53,7 @@ class LocalIndexDocumentStore(DocumentStore):
         field_weights: Optional[dict[str, float]] = None,
         hybrid_bm25_weight: float = 0.5,
         hybrid_semantic_weight: float = 0.5,
+        cache_dir: Optional[str] = None,
     ):
         """Initialize the local index document store
 
@@ -65,6 +66,8 @@ class LocalIndexDocumentStore(DocumentStore):
             field_weights: Field weights for ranking (default: {"summary": 3.0, "name": 2.0, "tags": 1.5, "extra": 1.0})
             hybrid_bm25_weight: Weight for BM25 in hybrid search (default: 0.5)
             hybrid_semantic_weight: Weight for semantic search in hybrid search (default: 0.5)
+            cache_dir: Directory holding the SQLite search cache. Defaults to ``<root dir>/.cache``.
+                Set this when the index lives on a read-only filesystem.
         """
         self.index_path = Path(index_path)
         self._documents: dict[str, DocumentMetadata] = {}  # Keyed by UUID
@@ -73,6 +76,7 @@ class LocalIndexDocumentStore(DocumentStore):
         self._enable_embeddings = enable_embeddings and EMBEDDINGS_AVAILABLE
         self._search_cache: Optional[SearchCache] = None
         self._embedding_manager: Optional[EmbeddingManager] = None
+        self._cache_dir: Optional[Path] = Path(cache_dir) if cache_dir else None
 
         # Search configuration
         self._bm25_k1 = bm25_k1
@@ -105,6 +109,7 @@ class LocalIndexDocumentStore(DocumentStore):
             field_weights=config.search.field_weights,
             hybrid_bm25_weight=config.search.hybrid_bm25_weight,
             hybrid_semantic_weight=config.search.hybrid_semantic_weight,
+            cache_dir=config.search.cache_dir,
         )
 
     async def initialize(self):
@@ -125,7 +130,9 @@ class LocalIndexDocumentStore(DocumentStore):
         # Initialize search cache if enabled
         if self._enable_cache:
             try:
-                self._search_cache = SearchCache(self.index_path)
+                self._search_cache = SearchCache(
+                    self.index_path, cache_dir=self._cache_dir
+                )
                 self._search_cache.initialize()
                 logger.info("Search cache initialized")
 

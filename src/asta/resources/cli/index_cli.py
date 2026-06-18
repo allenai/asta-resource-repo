@@ -383,18 +383,19 @@ async def cmd_show(args: argparse.Namespace):
 # ============================================================================
 
 
-def get_cache_dir(index_path: Path) -> Path:
-    """Get the cache directory path based on index location.
+def get_cache_dir(config) -> Path:
+    """Resolve the cache directory honoring config.search.cache_dir.
 
-    Args:
-        index_path: Path to the index file
-
-    Returns:
-        Path to cache directory (sibling to index file)
+    The cache directory holds both the SQLite search cache and the per-URL
+    content cache used by ``asta-documents fetch``. By default it sits next
+    to the index file at ``<index dir>/.cache``. The ``--cache-dir`` flag
+    (via ``config.search.cache_dir``) overrides this so the cache can live
+    on a writable filesystem when the index is read-only.
     """
-    # Cache directory is a sibling to the index file
-    # e.g., if index is at /path/to/index.yaml, cache is at /path/to/.cache/
-    return index_path.parent / ".cache"
+    override = getattr(config.search, "cache_dir", None)
+    if override:
+        return Path(override)
+    return Path(config.index_path).parent / ".cache"
 
 
 def compute_url_hash(url: str) -> str:
@@ -421,7 +422,7 @@ def format_size(size_bytes: int) -> str:
 async def cmd_cache_list(args: argparse.Namespace):
     """List all items in the cache."""
     config = load_config(overrides=getattr(args, "config_overrides", None))
-    cache_dir = get_cache_dir(Path(config.index_path))
+    cache_dir = get_cache_dir(config)
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -485,7 +486,7 @@ async def cmd_cache_list(args: argparse.Namespace):
 async def cmd_cache_stats(args: argparse.Namespace):
     """Show cache statistics."""
     config = load_config(overrides=getattr(args, "config_overrides", None))
-    cache_dir = get_cache_dir(Path(config.index_path))
+    cache_dir = get_cache_dir(config)
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -570,7 +571,7 @@ async def cmd_cache_stats(args: argparse.Namespace):
 async def cmd_cache_clean(args: argparse.Namespace):
     """Remove cache items older than max_age_days."""
     config = load_config(overrides=getattr(args, "config_overrides", None))
-    cache_dir = get_cache_dir(Path(config.index_path))
+    cache_dir = get_cache_dir(config)
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -619,7 +620,7 @@ async def cmd_cache_clean(args: argparse.Namespace):
 async def cmd_cache_clear(args: argparse.Namespace):
     """Remove all cache items."""
     config = load_config(overrides=getattr(args, "config_overrides", None))
-    cache_dir = get_cache_dir(Path(config.index_path))
+    cache_dir = get_cache_dir(config)
 
     if not cache_dir.exists():
         print("Cache directory does not exist.")
@@ -642,7 +643,7 @@ async def cmd_cache_clear(args: argparse.Namespace):
 async def cmd_cache_info(args: argparse.Namespace):
     """Show detailed information for a specific cached item."""
     config = load_config(overrides=getattr(args, "config_overrides", None))
-    cache_dir = get_cache_dir(Path(config.index_path)) / args.hash
+    cache_dir = get_cache_dir(config) / args.hash
 
     if not cache_dir.exists():
         print(f"Cache item not found: {args.hash}", file=sys.stderr)
@@ -771,7 +772,7 @@ async def cmd_fetch(args: argparse.Namespace):
 
         # Check cache
         url_hash = compute_url_hash(url)
-        cache_dir = get_cache_dir(Path(config.index_path)) / url_hash
+        cache_dir = get_cache_dir(config) / url_hash
         content_file = cache_dir / "content"
         metadata_file = cache_dir / "metadata.yaml"
 
@@ -925,6 +926,12 @@ Examples:
     parser.add_argument(
         "--root",
         help="Root directory containing index.yaml (default: .asta/documents)",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        help="Directory for the SQLite search cache and fetched content cache "
+        "(default: <root dir>/.cache). Use this when the index lives on a "
+        "read-only filesystem.",
     )
 
     # Subcommands
@@ -1188,6 +1195,11 @@ Examples:
         root_path = Path(args.root)
         index_path = root_path / "index.yaml"
         config_overrides["index_path"] = str(index_path)
+
+    if hasattr(args, "cache_dir") and args.cache_dir:
+        config_overrides.setdefault("search", {})["cache_dir"] = str(
+            Path(args.cache_dir)
+        )
 
     # Attach overrides to args so commands can access them
     args.config_overrides = config_overrides if config_overrides else None
