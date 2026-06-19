@@ -153,6 +153,11 @@ class LocalIndexDocumentStore(DocumentStore):
                         "Embeddings disabled: sentence-transformers not available."
                     )
 
+            except PermissionError:
+                # The cache needs writing but the location is read-only.
+                # This is an explicit user-actionable error (use --cache-dir),
+                # not something to silently fall back from.
+                raise
             except Exception as e:
                 logger.warning(
                     f"Failed to initialize search cache: {e}. Falling back to simple search."
