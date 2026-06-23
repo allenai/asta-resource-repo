@@ -1210,6 +1210,10 @@ Examples:
     except KeyboardInterrupt:
         print("\nInterrupted", file=sys.stderr)
         sys.exit(130)
+    except PermissionError as e:
+        # User-actionable: cache location isn't writable. No traceback.
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Unexpected error: {e}", file=sys.stderr)
         import traceback

@@ -100,6 +100,16 @@ class EmbeddingManager:
         desired = {"model_name": self.model_name, "dimension": str(self._dimension)}
         if stored == desired:
             return
+        if self._connection_is_read_only():
+            # The cache was opened immutable but has different (or no) model
+            # config than what we'd load. Treat this like missing embeddings:
+            # the cache was built for a different model and isn't usable here.
+            raise RuntimeError(
+                f"Cache embedding_config does not match model {self.model_name!r} "
+                f"and the cache is read-only. Rebuild the cache with the "
+                f"correct model, or set the embedding model to match what was "
+                f"used to build the cache."
+            )
         for key, value in desired.items():
             self.conn.execute(
                 "INSERT OR REPLACE INTO embedding_config (key, value) VALUES (?, ?)",
@@ -228,15 +238,31 @@ class EmbeddingManager:
         for row in cursor.fetchall():
             existing_uris.add(row[0])
 
-        # Generate embeddings for missing documents
-        missing_count = 0
-        for uri, doc in documents.items():
-            if uri not in existing_uris:
-                self.store_embedding(uri, doc.summary or "")
-                missing_count += 1
+        # Detect missing embeddings up front so we can fail cleanly when the
+        # cache was opened read-only (otherwise the first store_embedding()
+        # would raise an opaque SQLITE_READONLY from inside the loop).
+        missing_uris = [uri for uri in documents if uri not in existing_uris]
+        if not missing_uris:
+            return
 
-        if missing_count > 0:
-            logger.info(f"Generated embeddings for {missing_count} documents")
+        if self._connection_is_read_only():
+            raise RuntimeError(
+                f"{len(missing_uris)} document(s) are missing embeddings, but "
+                f"the search cache is read-only. Rebuild the cache with write "
+                f"access (or use --cache-dir to point to a writable location)."
+            )
+
+        for uri in missing_uris:
+            self.store_embedding(uri, documents[uri].summary or "")
+        logger.info(f"Generated embeddings for {len(missing_uris)} documents")
+
+    def _connection_is_read_only(self) -> bool:
+        """Return True if the underlying SQLite connection refuses writes."""
+        try:
+            row = self.conn.execute("PRAGMA query_only").fetchone()
+        except sqlite3.Error:
+            return False
+        return bool(row and row[0])
 
     def _cosine_similarity(self, vec1: "np.ndarray", vec2: "np.ndarray") -> float:
         """Calculate cosine similarity between two vectors

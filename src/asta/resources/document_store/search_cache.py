@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -37,39 +38,110 @@ class SearchCache:
         self.cache_path = Path(cache_dir) / cache_filename
         self.conn: Optional[sqlite3.Connection] = None
         self._initialized = False
+        self._read_only = False
+
+    @property
+    def read_only(self) -> bool:
+        """True when the cache was opened with immutable=1 (no writes allowed)."""
+        return self._read_only
 
     def initialize(self):
-        """Initialize the SQLite cache"""
+        """Open the SQLite cache.
+
+        Fast path: if the cache file exists and its stored YAML hash matches
+        the index, open it with ``mode=ro&immutable=1`` plus performance
+        PRAGMAs. This skips all locking and hot-journal recovery, which is
+        essential on read-only or networked filesystems.
+
+        Slow path: when the cache is missing or stale, open ``mode=rwc`` so
+        callers can (re)build it. Fail fast with a clear error if the
+        location is not writable.
+        """
         if self._initialized:
             return
 
-        # Create cache directory if needed
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Connect to SQLite database
-        self.conn = sqlite3.connect(str(self.cache_path))
-        self.conn.row_factory = sqlite3.Row  # Enable column access by name
-
-        # Running the schema script always opens a write transaction (even when
-        # every CREATE is a no-op), so skip it when the cache is already in
-        # sync with the YAML index. This keeps read-only invocations like
-        # `search --name`/`--tags`/`--extra` from touching the cache file.
-        if not self._cache_is_current():
+        if self.cache_path.exists() and self._probe_is_current():
+            self._open_immutable_readonly()
+            self._read_only = True
+        else:
+            self._open_writable_or_fail()
             self._init_schema()
+            self._read_only = False
 
         self._initialized = True
 
-    def _cache_is_current(self) -> bool:
-        """Return True if schema exists and the stored YAML hash matches."""
+    def _probe_is_current(self) -> bool:
+        """Read sync_metadata via a short-lived RO connection to check freshness.
+
+        Returns False if the file isn't a valid SQLite database, lacks our
+        schema, or its stored hash differs from the current YAML hash.
+        """
         try:
-            cursor = self.conn.cursor()
+            probe = sqlite3.connect(self._uri("mode=ro"), uri=True)
+        except sqlite3.Error:
+            return False
+        try:
+            cursor = probe.cursor()
             cursor.execute("SELECT value FROM sync_metadata WHERE key = 'yaml_hash'")
             row = cursor.fetchone()
         except sqlite3.Error:
             return False
+        finally:
+            probe.close()
         if row is None:
             return False
-        return row["value"] == self._calculate_yaml_hash()
+        return row[0] == self._calculate_yaml_hash()
+
+    def _open_immutable_readonly(self):
+        """Open the cache read-only with the immutable hint and tuning PRAGMAs."""
+        self.conn = sqlite3.connect(self._uri("mode=ro&immutable=1"), uri=True)
+        self.conn.row_factory = sqlite3.Row
+        # query_only forbids writes belt-and-suspenders; temp_store=MEMORY keeps
+        # sort/group-by spill off disk; cache_size and mmap_size let SQLite
+        # serve repeated queries (especially vector_search over embeddings)
+        # without per-page read() syscalls.
+        cursor = self.conn.cursor()
+        cursor.execute("PRAGMA query_only = 1")
+        cursor.execute("PRAGMA temp_store = MEMORY")
+        cursor.execute("PRAGMA cache_size = -65536")  # 64 MB
+        cursor.execute("PRAGMA mmap_size = 268435456")  # 256 MB
+
+    def _open_writable_or_fail(self):
+        """Open the cache read-write/create. Raise PermissionError on RO storage.
+
+        SQLite doesn't fail at connect() for an unwritable existing file — it
+        succeeds and only errors on the first write. To fail fast we check
+        access with os.access() before connecting. The directory must also be
+        writable so SQLite can create its rollback journal mid-transaction.
+        """
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise PermissionError(
+                f"Search cache needs to be (re)built but its directory "
+                f"{self.cache_path.parent} is not writable: {e}. "
+                f"Use --cache-dir to point to a writable location."
+            ) from e
+
+        if not os.access(self.cache_path.parent, os.W_OK):
+            raise PermissionError(
+                f"Search cache needs to be (re)built but its directory "
+                f"{self.cache_path.parent} is not writable. "
+                f"Use --cache-dir to point to a writable location."
+            )
+        if self.cache_path.exists() and not os.access(self.cache_path, os.W_OK):
+            raise PermissionError(
+                f"Search cache at {self.cache_path} is stale, but the file "
+                f"is not writable. Use --cache-dir to point to a writable "
+                f"location."
+            )
+
+        self.conn = sqlite3.connect(self._uri("mode=rwc"), uri=True)
+        self.conn.row_factory = sqlite3.Row
+
+    def _uri(self, query: str) -> str:
+        """Build a SQLite URI from the cache path, properly URL-encoding the path."""
+        return f"{self.cache_path.absolute().as_uri()}?{query}"
 
     def _init_schema(self):
         """Initialize database schema from SQL file"""
@@ -148,6 +220,15 @@ class SearchCache:
             self.initialize()
 
         if self.is_cache_stale():
+            if self._read_only:
+                # We only get here if index.yaml changed between initialize()
+                # (which verified the hash) and this query — a race we can't
+                # service from an immutable connection. Fail clearly instead
+                # of crashing inside the rebuild's first INSERT.
+                raise RuntimeError(
+                    f"YAML index changed after the cache at {self.cache_path} "
+                    f"was opened read-only. Re-run the command to rebuild."
+                )
             logger.info("YAML index changed, rebuilding search cache")
             await self._rebuild_cache(documents)
 
@@ -231,6 +312,7 @@ class SearchCache:
             self.conn.close()
             self.conn = None
         self._initialized = False
+        self._read_only = False
 
     def __enter__(self):
         """Context manager entry"""
