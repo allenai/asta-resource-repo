@@ -43,7 +43,19 @@ npx skills add add allenai/asta-resource-repo/skills
 ```
 
 ## Command Line Usage
-- 
+
+```bash
+# Add a document
+asta-documents add https://arxiv.org/pdf/1706.03762.pdf \
+  --name="Attention Is All You Need" \
+  --summary="Transformer architecture paper" \
+  --tags="ai,transformers"
+
+# Search and export to Theorizer paperstore
+asta-documents search --summary="transformer attention" --json \
+  | asta-documents export --format paperstore -o paperstore.json
+```
+
 See the **Asta-Documents Skill**: [skills/asta-documents/SKILL.md](skills/asta-documents/SKILL.md)
 
 ## Development
