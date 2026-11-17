@@ -439,7 +439,7 @@ async def cmd_cache_list(args: argparse.Namespace):
         if not metadata_file.exists():
             continue
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         content_size = content_file.stat().st_size if content_file.exists() else 0
@@ -516,7 +516,7 @@ async def cmd_cache_stats(args: argparse.Namespace):
 
         total_items += 1
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         if content_file.exists():
@@ -591,7 +591,7 @@ async def cmd_cache_clean(args: argparse.Namespace):
         if not metadata_file.exists():
             continue
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
@@ -656,7 +656,7 @@ async def cmd_cache_info(args: argparse.Namespace):
         print(f"Metadata file not found for: {args.hash}", file=sys.stderr)
         sys.exit(1)
 
-    with open(metadata_file, "r") as f:
+    with open(metadata_file, "r", encoding="utf-8") as f:
         metadata = yaml.safe_load(f)
 
     fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
@@ -778,7 +778,7 @@ async def cmd_fetch(args: argparse.Namespace):
 
         use_cache = False
         if content_file.exists() and metadata_file.exists() and not args.force:
-            with open(metadata_file, "r") as f:
+            with open(metadata_file, "r", encoding="utf-8") as f:
                 cache_metadata = yaml.safe_load(f)
             fetch_date = parse_cache_date(cache_metadata.get("fetch_date", ""))
             age_days = (datetime.now(timezone.utc) - fetch_date).days
@@ -816,7 +816,7 @@ async def cmd_fetch(args: argparse.Namespace):
                     "document_uuid": args.uuid,
                     "file_size": len(content),
                 }
-                with open(metadata_file, "w") as f:
+                with open(metadata_file, "w", encoding="utf-8") as f:
                     yaml.dump(cache_metadata, f)
 
                 if not args.quiet:
