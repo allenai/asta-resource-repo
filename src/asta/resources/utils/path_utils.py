@@ -2,6 +2,32 @@
 
 from pathlib import Path
 from urllib.parse import unquote, urlparse
+import re
+
+# Windows drive path, e.g. "C:\docs" or "C:/docs"
+_DRIVE_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def file_url_to_path(url: str) -> str:
+    """Extract the filesystem path from a file:// URL
+
+    Handles POSIX URLs (file:///home/x), Windows URLs with or without the
+    leading slash (file:///C:/x, file://C:/x, file://C:\\x), and localhost.
+    """
+    path = unquote(url.split("://", 1)[1])
+    if path.lower().startswith("localhost/"):
+        path = path[len("localhost") :]
+    if re.match(r"^/[A-Za-z]:", path):
+        path = path[1:]
+    return path
+
+
+def path_to_file_url(path: Path) -> str:
+    """Build a file:// URL for an absolute path (file:///C:/x on Windows)"""
+    posix = path.as_posix()
+    if not posix.startswith("/"):
+        posix = "/" + posix
+    return f"file://{posix}"
 
 
 def normalize_file_url(url: str, index_path: Path) -> str:
@@ -27,8 +53,8 @@ def normalize_file_url(url: str, index_path: Path) -> str:
         >>> normalize_file_url("https://example.com/paper.pdf", Path("/path/to/project/index.yaml"))
         "https://example.com/paper.pdf"
     """
-    # Parse the URL
-    parsed = urlparse(url)
+    # Windows drive paths would otherwise parse as a one-letter URL scheme
+    parsed = urlparse("" if _DRIVE_PATH.match(url) else url)
 
     # Only process file:// URLs or paths without scheme
     if parsed.scheme and parsed.scheme not in ("file", ""):
@@ -37,11 +63,7 @@ def normalize_file_url(url: str, index_path: Path) -> str:
 
     # Convert file:// URL to path
     if parsed.scheme == "file":
-        # Handle file:// URLs
-        file_path = unquote(parsed.path)
-        # On Windows, file URLs may have an extra leading slash
-        if file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
-            file_path = file_path[1:]
+        file_path = file_url_to_path(url)
     elif "://" not in url:
         # Plain file path without scheme - treat as absolute path
         file_path = url
@@ -86,4 +108,4 @@ def normalize_file_url(url: str, index_path: Path) -> str:
     except ValueError:
         # File is outside repository - return as absolute file:// URL
         # This ensures portability even for external files
-        return f"file://{target_path.as_posix()}"
+        return path_to_file_url(target_path)

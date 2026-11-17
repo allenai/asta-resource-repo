@@ -17,6 +17,7 @@ from ..config import load_config
 from ..model import DocumentMetadata
 from ..exceptions import ValidationError, DocumentServiceError
 from ..document_store.local_index import LocalIndexDocumentStore
+from ..utils.path_utils import path_to_file_url
 from .. import __version__
 
 
@@ -768,7 +769,7 @@ async def cmd_fetch(args: argparse.Namespace):
             # This is a relative path - resolve it relative to index parent directory
             repo_root = root_dir
             absolute_path = (repo_root / url).resolve()
-            url = f"file://{absolute_path.as_posix()}"
+            url = path_to_file_url(absolute_path)
 
         # Check cache
         url_hash = compute_url_hash(url)
