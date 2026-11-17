@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-import fcntl
 import yaml
 import logging
 
@@ -12,6 +11,7 @@ from ..model import (
     SearchHit,
 )
 from ..exceptions import ValidationError, DocumentServiceError
+from ..utils.file_lock import locked
 from ..utils.short_id import generate_unique_short_id
 from ..utils.path_utils import normalize_file_url
 from .base import DocumentStore
@@ -185,10 +185,9 @@ class LocalIndexDocumentStore(DocumentStore):
     def _load_index(self):
         """Load the YAML index file into memory"""
         try:
-            with open(self.index_path, "r") as f:
+            with open(self.index_path, "r", encoding="utf-8") as f:
                 # Use file locking to prevent concurrent reads during writes
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                try:
+                with locked(f, shared=True):
                     # Use C-based YAML loader for 10-15x faster parsing
                     Loader = (
                         yaml.CSafeLoader
@@ -196,8 +195,6 @@ class LocalIndexDocumentStore(DocumentStore):
                         else yaml.SafeLoader
                     )
                     data = yaml.load(f, Loader=Loader) or {}
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
             # Parse documents from YAML
             self._documents = {}
@@ -244,9 +241,8 @@ class LocalIndexDocumentStore(DocumentStore):
                 }
 
             # Write with exclusive lock for thread safety
-            with open(self.index_path, "w") as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                try:
+            with open(self.index_path, "w", encoding="utf-8") as f:
+                with locked(f):
                     yaml.dump(
                         data,
                         f,
@@ -254,8 +250,6 @@ class LocalIndexDocumentStore(DocumentStore):
                         sort_keys=False,
                         allow_unicode=True,
                     )
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
         except Exception as e:
             raise DocumentServiceError(f"Failed to save index file: {e}")

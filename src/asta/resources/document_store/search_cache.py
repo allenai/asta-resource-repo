@@ -147,7 +147,7 @@ class SearchCache:
         """Initialize database schema from SQL file"""
         schema_path = Path(__file__).parent / "schema.sql"
 
-        with open(schema_path, "r") as f:
+        with open(schema_path, "r", encoding="utf-8") as f:
             schema_sql = f.read()
 
         # Execute schema creation

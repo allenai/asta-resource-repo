@@ -304,3 +304,27 @@ def test_normalize_standard_asta_still_works():
         # Should convert to relative path
         assert result == "README.pdf"
         assert "file://" not in result
+
+
+def test_file_url_to_path_handles_posix_and_windows_forms():
+    """file:// URL parsing works for POSIX and every common Windows form"""
+    from asta.resources.utils.path_utils import file_url_to_path
+
+    assert file_url_to_path("file:///home/u/a%20b.pdf") == "/home/u/a b.pdf"
+    assert file_url_to_path("file://localhost/home/u/a.pdf") == "/home/u/a.pdf"
+    assert file_url_to_path("file:///C:/Users/u/a.pdf") == "C:/Users/u/a.pdf"
+    assert file_url_to_path("file://C:/Users/u/a.pdf") == "C:/Users/u/a.pdf"
+    assert file_url_to_path("file://C:\\Users\\u\\a.pdf") == "C:\\Users\\u\\a.pdf"
+
+
+def test_path_to_file_url_uses_three_slashes():
+    """file:// URLs for absolute paths always have an empty host"""
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    from asta.resources.utils.path_utils import path_to_file_url
+
+    assert path_to_file_url(PurePosixPath("/home/u/a.pdf")) == "file:///home/u/a.pdf"
+    assert (
+        path_to_file_url(PureWindowsPath("C:\\Users\\u\\a.pdf"))
+        == "file:///C:/Users/u/a.pdf"
+    )

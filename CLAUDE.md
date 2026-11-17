@@ -624,7 +624,7 @@ def is_cache_stale() -> bool:
 5. Generate embeddings (if enabled)
 6. Store new YAML hash
 
-**Thread safety**: Uses `fcntl` file locking (same as YAML)
+**Thread safety**: Uses file locking (same as YAML) via `utils/file_lock.py` (`fcntl` on POSIX, `msvcrt` on Windows)
 
 ### Testing
 

@@ -17,6 +17,7 @@ from ..config import load_config
 from ..model import DocumentMetadata
 from ..exceptions import ValidationError, DocumentServiceError
 from ..document_store.local_index import LocalIndexDocumentStore
+from ..utils.path_utils import path_to_file_url
 from .. import __version__
 
 
@@ -439,7 +440,7 @@ async def cmd_cache_list(args: argparse.Namespace):
         if not metadata_file.exists():
             continue
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         content_size = content_file.stat().st_size if content_file.exists() else 0
@@ -516,7 +517,7 @@ async def cmd_cache_stats(args: argparse.Namespace):
 
         total_items += 1
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         if content_file.exists():
@@ -591,7 +592,7 @@ async def cmd_cache_clean(args: argparse.Namespace):
         if not metadata_file.exists():
             continue
 
-        with open(metadata_file, "r") as f:
+        with open(metadata_file, "r", encoding="utf-8") as f:
             metadata = yaml.safe_load(f)
 
         fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
@@ -656,7 +657,7 @@ async def cmd_cache_info(args: argparse.Namespace):
         print(f"Metadata file not found for: {args.hash}", file=sys.stderr)
         sys.exit(1)
 
-    with open(metadata_file, "r") as f:
+    with open(metadata_file, "r", encoding="utf-8") as f:
         metadata = yaml.safe_load(f)
 
     fetch_date = parse_cache_date(metadata.get("fetch_date", ""))
@@ -768,7 +769,7 @@ async def cmd_fetch(args: argparse.Namespace):
             # This is a relative path - resolve it relative to index parent directory
             repo_root = root_dir
             absolute_path = (repo_root / url).resolve()
-            url = f"file://{absolute_path.as_posix()}"
+            url = path_to_file_url(absolute_path)
 
         # Check cache
         url_hash = compute_url_hash(url)
@@ -778,7 +779,7 @@ async def cmd_fetch(args: argparse.Namespace):
 
         use_cache = False
         if content_file.exists() and metadata_file.exists() and not args.force:
-            with open(metadata_file, "r") as f:
+            with open(metadata_file, "r", encoding="utf-8") as f:
                 cache_metadata = yaml.safe_load(f)
             fetch_date = parse_cache_date(cache_metadata.get("fetch_date", ""))
             age_days = (datetime.now(timezone.utc) - fetch_date).days
@@ -816,7 +817,7 @@ async def cmd_fetch(args: argparse.Namespace):
                     "document_uuid": args.uuid,
                     "file_size": len(content),
                 }
-                with open(metadata_file, "w") as f:
+                with open(metadata_file, "w", encoding="utf-8") as f:
                     yaml.dump(cache_metadata, f)
 
                 if not args.quiet:
